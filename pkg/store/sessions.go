@@ -73,7 +73,7 @@ func (s *Store) RegisterUser(ctx context.Context, u *user.User, hash string, fir
 	res, err := tx.ExecContext(ctx,
 		`INSERT INTO users (uid, username, email, display_name, preferences, password_hash, password_updated_at, status, created_at)
 		 VALUES (?, ?, NULL, ?, ?, ?, ?, 'active', ?)`,
-		uid, nullStr(u.Username), u.DisplayName, string(u.Preferences), hash, now, now)
+		uid, nullStr(u.Username), u.DisplayName, u.Preferences.StoredJSON(), hash, now, now)
 	if err != nil {
 		if m := mapUserErr(err); m != err {
 			return m

@@ -1,6 +1,6 @@
 // Package user models user profiles: a uid, a display name, optional login
-// identifiers (username, email) and free-form preferences stored as a JSON
-// object.
+// identifiers (username, email) and typed preferences (see Preferences)
+// stored as one JSON object.
 //
 // The record also has fields reserved for authentication, which is not
 // implemented yet: password_hash (basic login) and linked SSO identities
@@ -11,6 +11,7 @@ package user
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/mail"
 	"regexp"
@@ -25,7 +26,7 @@ import (
 const (
 	MaxDisplayNameLen  = 100
 	MaxEmailLen        = 254
-	MaxPreferencesSize = 32 << 10 // bytes of the compacted JSON object (requests are capped at 64 KiB)
+	MaxPreferencesSize = 32 << 10 // bytes of the JSON object (requests are capped at 64 KiB)
 )
 
 // Status of an account. Only "active" is used until auth exists; "disabled"
@@ -43,20 +44,20 @@ var usernameRE = regexp.MustCompile(`^[a-z0-9][a-z0-9._-]{2,31}$`)
 
 // User is a stored profile. PasswordHash is never serialized.
 type User struct {
-	ID              int64           `json:"-"`   // internal row id; the API uses UID
-	UID             string          `json:"uid"` // server-assigned UUID v4; immutable
-	Username        *string         `json:"username"`
-	Email           *string         `json:"email"`
-	EmailVerifiedAt *string         `json:"email_verified_at"` // set by a future verification flow
-	DisplayName     string          `json:"display_name"`
-	Preferences     json.RawMessage `json:"preferences"` // always a JSON object
-	Status          Status          `json:"status"`
-	HasPassword     bool            `json:"has_password"` // derived: PasswordHash != nil
-	PasswordHash    *string         `json:"-"`            // future basic auth (e.g. argon2id PHC string); NEVER exposed
-	PasswordUpdated *string         `json:"password_updated_at"`
-	LastLoginAt     *string         `json:"last_login_at"`
-	CreatedAt       string          `json:"created_at"`
-	UpdatedAt       *string         `json:"updated_at"`
+	ID              int64       `json:"-"`   // internal row id; the API uses UID
+	UID             string      `json:"uid"` // server-assigned UUID v4; immutable
+	Username        *string     `json:"username"`
+	Email           *string     `json:"email"`
+	EmailVerifiedAt *string     `json:"email_verified_at"` // set by a future verification flow
+	DisplayName     string      `json:"display_name"`
+	Preferences     Preferences `json:"preferences"` // stored as one JSON object
+	Status          Status      `json:"status"`
+	HasPassword     bool        `json:"has_password"` // derived: PasswordHash != nil
+	PasswordHash    *string     `json:"-"`            // future basic auth (e.g. argon2id PHC string); NEVER exposed
+	PasswordUpdated *string     `json:"password_updated_at"`
+	LastLoginAt     *string     `json:"last_login_at"`
+	CreatedAt       string      `json:"created_at"`
+	UpdatedAt       *string     `json:"updated_at"`
 }
 
 // Input is the payload for POST /api/users and PUT /api/users/:uid (and the
@@ -77,31 +78,6 @@ type Input struct {
 	IgnoredLastLoginAt     *string `json:"last_login_at,omitempty"`
 	IgnoredCreatedAt       *string `json:"created_at,omitempty"`
 	IgnoredUpdatedAt       *string `json:"updated_at,omitempty"`
-}
-
-// NormalizePreferences checks that raw is a JSON object of at most
-// MaxPreferencesSize bytes and returns it compacted. Absent or null → {}.
-func NormalizePreferences(raw json.RawMessage) (json.RawMessage, string) {
-	trimmed := bytes.TrimSpace(raw)
-	if len(trimmed) == 0 || bytes.Equal(trimmed, []byte("null")) {
-		return json.RawMessage(`{}`), ""
-	}
-	if trimmed[0] != '{' {
-		return nil, "must be a JSON object"
-	}
-	var buf bytes.Buffer
-	if err := json.Compact(&buf, trimmed); err != nil {
-		return nil, "must be valid JSON"
-	}
-	// Compact accepts any JSON value; make sure it is really one object.
-	var obj map[string]json.RawMessage
-	if err := json.Unmarshal(buf.Bytes(), &obj); err != nil || obj == nil {
-		return nil, "must be a JSON object"
-	}
-	if buf.Len() > MaxPreferencesSize {
-		return nil, fmt.Sprintf("must be at most %d bytes", MaxPreferencesSize)
-	}
-	return json.RawMessage(buf.Bytes()), ""
 }
 
 // NormalizeEmail trims and lowercases an address and checks it is a bare
@@ -161,9 +137,17 @@ func (in Input) Validate() (User, error) {
 			u.Email = &v
 		}
 	}
-	prefs, msg := NormalizePreferences(in.Preferences)
-	if msg != "" {
-		fields["preferences"] = msg
+	prefs, err := DecodePreferences(in.Preferences)
+	var ve *validate.ValidationError
+	if errors.As(err, &ve) {
+		for k, v := range ve.Fields {
+			if k != "preferences" {
+				k = "preferences." + k
+			}
+			fields[k] = v
+		}
+	} else if err != nil {
+		return User{}, err
 	}
 	u.Preferences = prefs
 	u.Status = StatusActive
@@ -176,7 +160,7 @@ func (in Input) Validate() (User, error) {
 
 // Input returns the editable fields of a stored user, for PATCH merging.
 func (u User) Input() Input {
-	return Input{Username: u.Username, Email: u.Email, DisplayName: u.DisplayName, Preferences: u.Preferences}
+	return Input{Username: u.Username, Email: u.Email, DisplayName: u.DisplayName, Preferences: json.RawMessage(u.Preferences.StoredJSON())}
 }
 
 var patchFields = map[string]bool{"username": true, "email": true, "display_name": true, "preferences": true}

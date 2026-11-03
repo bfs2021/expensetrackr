@@ -23,7 +23,7 @@ func newUserStore(t *testing.T, names ...string) (*Store, []string) {
 	t.Cleanup(func() { st.Close() })
 	var uids []string
 	for _, n := range names {
-		u := user.User{Username: strp(n), DisplayName: n, Preferences: []byte("{}")}
+		u := user.User{Username: strp(n), DisplayName: n}
 		if err := st.RegisterUser(context.Background(), &u, "$2a$04$hash", false); err != nil {
 			t.Fatal(err)
 		}

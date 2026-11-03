@@ -272,7 +272,7 @@ func (s *Server) register(c *gin.Context) {
 		internalError(c, err)
 		return
 	}
-	u := user.User{Username: &username, DisplayName: display, Preferences: []byte("{}")}
+	u := user.User{Username: &username, DisplayName: display}
 	err = s.Store.RegisterUser(c.Request.Context(), &u, hash, !loggedIn)
 	if errors.Is(err, store.ErrRegistrationClosed) {
 		c.JSON(http.StatusForbidden, errorBody{Error: "registration is closed; log in to create more users", Code: "registration_closed"})

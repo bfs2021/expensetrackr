@@ -3,10 +3,12 @@ package api
 import (
 	"encoding/json"
 	"errors"
+	"io"
 	"net/http"
 
 	"github.com/nutmos/expensetrackr/pkg/store"
 	"github.com/nutmos/expensetrackr/pkg/user"
+	"github.com/nutmos/expensetrackr/pkg/validate"
 
 	"github.com/gin-gonic/gin"
 )
@@ -22,6 +24,8 @@ func (s *Server) registerUserRoutes(api *gin.RouterGroup) {
 	api.PATCH("/users/:uid", s.patchUser)
 	api.DELETE("/users/:uid", s.deleteUser)
 	api.GET("/users/:uid/identities", s.listUserIdentities)
+	api.GET("/users/:uid/preferences", s.getPreferences)
+	api.PUT("/users/:uid/preferences", s.replacePreferences)
 }
 
 // writeUserError maps user errors: 404, 409 duplicate username/email, then
@@ -166,4 +170,63 @@ func (s *Server) listUserIdentities(c *gin.Context) {
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"identities": items, "count": len(items)})
+}
+
+// resolveOwnUser is resolveUser for endpoints only the user themself may use:
+// another user's uid is 403 (preferences are personal).
+func (s *Server) resolveOwnUser(c *gin.Context) (user.User, bool) {
+	u, ok := s.resolveUser(c)
+	if !ok {
+		return user.User{}, false
+	}
+	if me, ok := currentUser(c); !ok || me.UID != u.UID {
+		c.JSON(http.StatusForbidden, errorBody{Error: "preferences can only be read or changed by their own user"})
+		return user.User{}, false
+	}
+	return u, true
+}
+
+// getPreferences returns the effective preferences (defaults filled in).
+func (s *Server) getPreferences(c *gin.Context) {
+	if u, ok := s.resolveOwnUser(c); ok {
+		c.JSON(http.StatusOK, u.Preferences)
+	}
+}
+
+// replacePreferences handles PUT: the body replaces the whole preferences
+// object (omitted keys go back to their defaults). Any invalid value,
+// including an unsupported base_currency or an unknown key, is a 400.
+func (s *Server) replacePreferences(c *gin.Context) {
+	cur, ok := s.resolveOwnUser(c)
+	if !ok {
+		return
+	}
+	c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, maxBodyBytes)
+	raw, err := io.ReadAll(c.Request.Body)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, errorBody{Error: "request body too large"})
+		return
+	}
+	if !json.Valid(raw) {
+		c.JSON(http.StatusBadRequest, errorBody{Error: "request body must be a JSON object"})
+		return
+	}
+	prefs, err := user.DecodePreferences(raw)
+	var ve *validate.ValidationError
+	if errors.As(err, &ve) {
+		c.JSON(http.StatusBadRequest, errorBody{Error: "invalid preferences", Fields: ve.Fields})
+		return
+	} else if err != nil {
+		internalError(c, err)
+		return
+	}
+	updated, err := s.Store.UpdateUser(c.Request.Context(), cur.ID, func(existing user.User) (user.User, error) {
+		existing.Preferences = prefs
+		return existing, nil
+	})
+	if err != nil {
+		writeUserError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, updated.Preferences)
 }

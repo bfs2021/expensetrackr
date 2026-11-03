@@ -34,13 +34,13 @@ func TestUserStore(t *testing.T) {
 	defer st.Close()
 
 	a := newUser(t, st, user.Input{DisplayName: "Alice", Username: sp("Alice"), Email: sp("Alice@Example.com"),
-		Preferences: json.RawMessage(`{ "currency": "THB", "theme": {"dark": true} }`)})
+		Preferences: json.RawMessage(`{ "base_currency": "thb" }`)})
 	if !uuidV4.MatchString(a.UID) || *a.Username != "alice" || *a.Email != "alice@example.com" ||
-		string(a.Preferences) != `{"currency":"THB","theme":{"dark":true}}` || a.Status != user.StatusActive || a.HasPassword {
+		a.Preferences.BaseCurrency != "THB" || a.Status != user.StatusActive || a.HasPassword {
 		t.Fatalf("created: %+v", a)
 	}
 	got, err := st.GetUserByUID(ctx, a.UID)
-	if err != nil || string(got.Preferences) != string(a.Preferences) || got.PasswordHash != nil {
+	if err != nil || got.Preferences != a.Preferences || got.PasswordHash != nil {
 		t.Fatalf("get: %+v %v", got, err)
 	}
 
@@ -58,13 +58,11 @@ func TestUserStore(t *testing.T) {
 	newUser(t, st, user.Input{DisplayName: "No login 2"})
 
 	// The database itself rejects non-object preferences.
-	bad := user.User{DisplayName: "x", Preferences: json.RawMessage(`[1,2]`)}
-	if err := st.CreateUser(ctx, &bad); err == nil {
-		t.Error("array preferences accepted by DB")
-	}
-	bad = user.User{DisplayName: "x", Preferences: json.RawMessage(`{bad`)}
-	if err := st.CreateUser(ctx, &bad); err == nil {
-		t.Error("invalid JSON accepted by DB")
+	for _, raw := range []string{`[1,2]`, `{bad`} {
+		if _, err := st.db.ExecContext(ctx, `INSERT INTO users (uid, display_name, preferences, status, created_at)
+			VALUES ('00000000-0000-4000-8000-000000000001', 'x', ?, 'active', '2026-01-01T00:00:00Z')`, raw); err == nil {
+			t.Errorf("preferences %s accepted by DB", raw)
+		}
 	}
 
 	// Password hash: stored, never lost by profile updates; email change

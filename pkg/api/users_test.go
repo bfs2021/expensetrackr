@@ -40,7 +40,7 @@ func noSecrets(t *testing.T, label, body string) {
 func TestUsersCRUD(t *testing.T) {
 	h, st := newTestServerWithStore(t)
 
-	rec, u := do(t, h, "POST", "/api/users", `{"display_name":" Nat ","username":"Nat","email":"Nat@Example.com","preferences":{"currency":"THB","theme":"dark"}}`)
+	rec, u := do(t, h, "POST", "/api/users", `{"display_name":" Nat ","username":"Nat","email":"Nat@Example.com","preferences":{"base_currency":"thb"}}`)
 	if rec.Code != http.StatusCreated {
 		t.Fatalf("create: %d %s", rec.Code, rec.Body)
 	}
@@ -51,14 +51,14 @@ func TestUsersCRUD(t *testing.T) {
 		u["last_login_at"] != nil || u["password_updated_at"] != nil || u["updated_at"] != nil {
 		t.Errorf("create body: %v", u)
 	}
-	if p, ok := u["preferences"].(map[string]any); !ok || p["currency"] != "THB" || p["theme"] != "dark" {
+	if p, ok := u["preferences"].(map[string]any); !ok || len(p) != 1 || p["base_currency"] != "THB" {
 		t.Errorf("preferences: %#v", u["preferences"])
 	}
 	noSecrets(t, "create", rec.Body.String())
 
-	// Minimal profile: only display_name; preferences default {}.
+	// Minimal profile: only display_name; preferences take their defaults.
 	rec, m := do(t, h, "POST", "/api/users", `{"display_name":"Guest"}`)
-	if rec.Code != 201 || m["username"] != nil || m["email"] != nil || len(m["preferences"].(map[string]any)) != 0 {
+	if rec.Code != 201 || m["username"] != nil || m["email"] != nil || m["preferences"].(map[string]any)["base_currency"] != user.DefaultBaseCurrency {
 		t.Errorf("minimal: %d %v", rec.Code, m)
 	}
 	guest := m["uid"].(string)
@@ -73,6 +73,8 @@ func TestUsersCRUD(t *testing.T) {
 		{`{"display_name":"x","preferences":[1,2]}`, 422, "preferences"},
 		{`{"display_name":"x","preferences":"dark"}`, 422, "preferences"},
 		{`{"display_name":"x","preferences":42}`, 422, "preferences"},
+		{`{"display_name":"x","preferences":{"theme":"dark"}}`, 422, "preferences"},
+		{`{"display_name":"x","preferences":{"base_currency":"XYZ"}}`, 422, "preferences.base_currency"},
 		{`{"display_name":"x","email":"not-an-email"}`, 422, "email"},
 		{`{"display_name":"x","username":"a b"}`, 422, "username"},
 		{`{"display_name":"x","username":"NAT"}`, 409, "username"},
@@ -105,11 +107,11 @@ func TestUsersCRUD(t *testing.T) {
 	noSecrets(t, "list", rec.Body.String())
 
 	// PATCH: preferences replaced as a whole; read-only fields ignored.
-	rec, got = do(t, h, "PATCH", path, `{"preferences":{"theme":"light"},"status":"disabled","has_password":false,"uid":"x"}`)
+	rec, got = do(t, h, "PATCH", path, `{"preferences":{"base_currency":"EUR"},"status":"disabled","has_password":false,"uid":"x"}`)
 	if rec.Code != 200 || got["status"] != "active" || got["has_password"] != true || got["uid"] != uid || got["updated_at"] == nil {
 		t.Errorf("patch: %d %v", rec.Code, got)
 	}
-	if p := got["preferences"].(map[string]any); len(p) != 1 || p["theme"] != "light" {
+	if p := got["preferences"].(map[string]any); len(p) != 1 || p["base_currency"] != "EUR" {
 		t.Errorf("patch replaces preferences: %v", p)
 	}
 	noSecrets(t, "patch", rec.Body.String())
@@ -141,7 +143,7 @@ func TestUsersCRUD(t *testing.T) {
 		t.Errorf("PUT round-trip: %d %v", rec.Code, got)
 	}
 	rec, got = do(t, h, "PUT", path, `{"display_name":"Nat E."}`)
-	if rec.Code != 200 || got["username"] != nil || got["email"] != nil || len(got["preferences"].(map[string]any)) != 0 || got["has_password"] != true {
+	if rec.Code != 200 || got["username"] != nil || got["email"] != nil || got["preferences"].(map[string]any)["base_currency"] != user.DefaultBaseCurrency || got["has_password"] != true {
 		t.Errorf("PUT minimal clears profile fields only: %d %v", rec.Code, got)
 	}
 	noSecrets(t, "put", rec.Body.String())
