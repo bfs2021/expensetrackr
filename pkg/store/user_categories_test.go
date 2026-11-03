@@ -169,7 +169,11 @@ func TestUserCategoriesVersionConflictRetry(t *testing.T) {
 	// (a second connection to the same WAL database): our write sees a stale
 	// row, is retried once from a fresh read and succeeds without losing the
 	// other writer's change.
-	other, err := sql.Open("sqlite", "file:"+st.path+"?_pragma=busy_timeout(5000)")
+	var path string
+	if err := st.db.QueryRowContext(ctx, `SELECT file FROM pragma_database_list WHERE name = 'main'`).Scan(&path); err != nil {
+		t.Fatal(err)
+	}
+	other, err := sql.Open("sqlite", "file:"+path+"?_pragma=busy_timeout(5000)")
 	if err != nil {
 		t.Fatal(err)
 	}

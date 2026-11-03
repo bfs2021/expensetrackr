@@ -140,7 +140,7 @@ func TestBalanceSignRules(t *testing.T) {
 				}
 			}
 			// Deleting reverses the effect exactly (version moves on).
-			if err := f.st.Delete(context.Background(), e.ID); err != nil {
+			if err := f.st.DeleteWith(context.Background(), e.ID, WriteOptions{}); err != nil {
 				t.Fatal(err)
 			}
 			for name, amt := range initial {
@@ -176,7 +176,7 @@ func TestUpdateReversesOldEffectAndAppliesNew(t *testing.T) {
 
 	update := func(next transaction.Transaction) transaction.Transaction {
 		t.Helper()
-		got, err := f.st.Update(ctx, e.ID, func(transaction.Transaction) (transaction.Transaction, error) { return next, nil })
+		got, err := f.st.UpdateWith(ctx, e.ID, WriteOptions{}, func(transaction.Transaction) (transaction.Transaction, error) { return next, nil })
 		if err != nil {
 			t.Fatalf("update: %v", err)
 		}
@@ -214,7 +214,7 @@ func TestUpdateReversesOldEffectAndAppliesNew(t *testing.T) {
 		t.Errorf("transaction version = %d, want 7", e.Version)
 	}
 	// Delete: everything back to the start.
-	if err := f.st.Delete(ctx, e.ID); err != nil {
+	if err := f.st.DeleteWith(ctx, e.ID, WriteOptions{}); err != nil {
 		t.Fatal(err)
 	}
 	f.want(f.pay, "1000.00", 7)
@@ -254,7 +254,7 @@ func TestCurrencyMismatchRejected(t *testing.T) {
 
 	// Update to a mismatching currency is rejected; row and balance unchanged.
 	ok := f.create(f.tx("expense", "5", "THB", f.pay, nil))
-	_, err := f.st.Update(ctx, ok.ID, func(transaction.Transaction) (transaction.Transaction, error) {
+	_, err := f.st.UpdateWith(ctx, ok.ID, WriteOptions{}, func(transaction.Transaction) (transaction.Transaction, error) {
 		return f.tx("expense", "5", "USD", f.pay, nil), nil
 	})
 	fieldErr(t, err, "balance_uid")
@@ -290,7 +290,7 @@ func TestMissingBalance(t *testing.T) {
 		t.Fatal(err)
 	}
 	// Deleting the transaction reverses what it can (pay) and skips gold.
-	if err := f.st.Delete(ctx, e.ID); err != nil {
+	if err := f.st.DeleteWith(ctx, e.ID, WriteOptions{}); err != nil {
 		t.Fatalf("delete with missing balance: %v", err)
 	}
 	f.want(f.pay, "1000.00", 3)

@@ -96,7 +96,7 @@ func TestManualEditRecordsAdjustment(t *testing.T) {
 		t.Errorf("expense filter: %d", len(exp))
 	}
 	// Deleting the expense reverses only the expense.
-	if err := f.st.Delete(context.Background(), exp[0].ID); err != nil {
+	if err := f.st.DeleteWith(context.Background(), exp[0].ID, WriteOptions{}); err != nil {
 		t.Fatal(err)
 	}
 	f.want(f.pay, "950.00", 4)
@@ -177,7 +177,7 @@ func TestAdjustmentIsReadOnly(t *testing.T) {
 		t.Errorf("create adjustment: %v", err)
 	}
 	exp := f.create(f.tx("expense", "5", "THB", f.pay, nil))
-	if _, err := f.st.Update(ctx, exp.ID, func(cur transaction.Transaction) (transaction.Transaction, error) {
+	if _, err := f.st.UpdateWith(ctx, exp.ID, WriteOptions{}, func(cur transaction.Transaction) (transaction.Transaction, error) {
 		cur.Type = transaction.BalanceAdjustment
 		return cur, nil
 	}); !errors.Is(err, ErrReadOnly) {

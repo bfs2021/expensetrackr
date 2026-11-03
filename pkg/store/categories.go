@@ -170,7 +170,7 @@ func (s *Store) CreateCategory(ctx context.Context, userUID string, c *category.
 	}
 	out := *c
 	out.UID = uid
-	out.CreatedAt = time.Now().UTC().Format(time.RFC3339)
+	out.CreatedAt = s.nowRFC3339()
 	out.UpdatedAt = nil
 	err = s.modifyCategories(ctx, userUID, func(_ *sql.Tx, cats []category.Category) ([]category.Category, error) {
 		if nameTaken(cats, out, "") {
@@ -272,7 +272,7 @@ func (s *Store) UpdateCategory(ctx context.Context, userUID, uid string, fn func
 		if nameTaken(cats, next, cur.UID) {
 			return nil, ErrDuplicateCategory
 		}
-		now := time.Now().UTC().Format(time.RFC3339)
+		now := s.nowRFC3339()
 		next.UID, next.CreatedAt, next.UpdatedAt = cur.UID, cur.CreatedAt, &now
 		out := append([]category.Category(nil), cats...)
 		out[i] = next

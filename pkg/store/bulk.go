@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"strings"
-	"time"
 
 	"github.com/nutmos/expensetrackr/pkg/balance"
 	"github.com/nutmos/expensetrackr/pkg/transaction"
@@ -113,7 +112,7 @@ func (s *Store) CreateBulk(ctx context.Context, items []BulkItem, opts BulkOptio
 	}
 	defer func() { _ = tx.Rollback() }() // no-op after Commit
 
-	now := time.Now().UTC().Format(time.RFC3339)
+	now := s.nowRFC3339()
 	failed := 0
 	var touched []string
 	seen := map[string]bool{}

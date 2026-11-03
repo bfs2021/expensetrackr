@@ -25,6 +25,9 @@ func envOr(key, def string) string {
 	return def
 }
 
+// shutdownTimeout bounds how long in-flight requests get to finish on SIGINT/SIGTERM.
+const shutdownTimeout = 5 * time.Second
+
 func main() {
 	addr := flag.String("addr", envOr("EXPENSE_ADDR", "127.0.0.1:8080"), "listen address (env EXPENSE_ADDR); use :8080 to listen on all interfaces")
 	dbPath := flag.String("db", envOr("EXPENSE_DB", "data/expenses.db"), "SQLite database file (env EXPENSE_DB)")
@@ -54,7 +57,7 @@ func main() {
 	signal.Notify(stop, syscall.SIGINT, syscall.SIGTERM)
 	<-stop
 	log.Print("shutting down")
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), shutdownTimeout)
 	defer cancel()
 	if err := srv.Shutdown(ctx); err != nil {
 		log.Printf("shutdown: %v", err)

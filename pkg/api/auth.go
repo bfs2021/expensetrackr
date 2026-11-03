@@ -2,6 +2,7 @@ package api
 
 import (
 	"errors"
+	"fmt"
 	"net/http"
 	"net/url"
 	"strconv"
@@ -49,6 +50,12 @@ func (s *Server) authInit() {
 		}
 	})
 }
+
+// Input length limits for session handling.
+const (
+	maxSessionTokenLen = 128 // longest session cookie value worth looking up
+	maxUserAgentLen    = 256 // user agent stored with a session is truncated to this
+)
 
 func (s *Server) now() time.Time {
 	if s.Now != nil {
@@ -139,7 +146,7 @@ func (s *Server) unauthorized(c *gin.Context) {
 // active. It slides the expiry (at most once per touchEvery).
 func (s *Server) loadSession(c *gin.Context) (user.User, store.Session, bool) {
 	ck, err := c.Request.Cookie(sessionCookie)
-	if err != nil || ck.Value == "" || len(ck.Value) > 128 {
+	if err != nil || ck.Value == "" || len(ck.Value) > maxSessionTokenLen {
 		return user.User{}, store.Session{}, false
 	}
 	ctx := c.Request.Context()
@@ -188,8 +195,8 @@ func (s *Server) startSession(c *gin.Context, u user.User) error {
 	}
 	now := s.now()
 	ua := c.Request.UserAgent()
-	if len(ua) > 256 {
-		ua = ua[:256]
+	if len(ua) > maxUserAgentLen {
+		ua = ua[:maxUserAgentLen]
 	}
 	se := store.Session{TokenHash: auth.HashToken(tok), UserUID: u.UID, CreatedAt: now, ExpiresAt: now.Add(auth.SessionTTL), LastSeenAt: now, UserAgent: ua}
 	ctx := c.Request.Context()
@@ -239,8 +246,8 @@ func (s *Server) register(c *gin.Context) {
 	if in.DisplayName != nil && strings.TrimSpace(*in.DisplayName) != "" {
 		display = strings.TrimSpace(*in.DisplayName)
 	}
-	if len(display) > 100 {
-		fields["display_name"] = "must be at most 100 characters"
+	if len(display) > user.MaxDisplayNameLen {
+		fields["display_name"] = fmt.Sprintf("must be at most %d characters", user.MaxDisplayNameLen)
 	}
 	_, loggedIn := currentUser(c)
 	s.auth.regMu.Lock()
