@@ -30,7 +30,7 @@ type Transaction struct {
 	Note         string  `json:"note"`
 	CreatedAt    string  `json:"created_at"` // RFC 3339, UTC
 	UpdatedAt    *string `json:"updated_at"` // RFC 3339, UTC; null until edited
-	// Version starts at 1 and is incremented on every change. PUT/PATCH must
+	// Version starts at 1 and is incremented on every change. PUT must
 	// send the version they last read (If-Match or "version"); see docs/balances.md.
 	Version int64 `json:"version"`
 	// AdjustsBalances is true when this transaction moved its balances (every
@@ -129,7 +129,7 @@ const (
 	// category; it is not counted as an expense or income.
 	AssetPurchase Type = "asset_purchase"
 	// BalanceAdjustment ("Balance Adjustment") is recorded automatically when
-	// a balance's amount is edited by hand (PUT/PATCH /api/balances/:uid). It
+	// a balance's amount is edited by hand (PUT /api/balances/:uid). It
 	// cannot be created, edited or deleted through the transactions API and
 	// never moves a balance itself (the manual edit already set the value).
 	BalanceAdjustment Type = "balance_adjustment"
@@ -140,8 +140,8 @@ const (
 func (t Type) HasDestination() bool { return t == Transfer || t == AssetPurchase }
 
 // ErrAdjustmentType is the field message for an attempt to use type
-// balance_adjustment in POST/PUT/PATCH /api/transactions.
-const ErrAdjustmentType = "balance_adjustment transactions are created automatically when a balance amount is edited (PUT/PATCH /api/balances/:uid); they cannot be created or changed here"
+// balance_adjustment in POST/PUT /api/transactions.
+const ErrAdjustmentType = "balance_adjustment transactions are created automatically when a balance amount is edited (PUT /api/balances/:uid); they cannot be created or changed here"
 
 // ConversionRate is one direction of the conversion a cross-currency
 // transfer actually made: Rate units of To per 1 From. It has the same

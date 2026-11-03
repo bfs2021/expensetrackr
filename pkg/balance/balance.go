@@ -40,8 +40,8 @@ type Balance struct {
 	OverLimit      *bool           `json:"over_limit"` // debt > limit
 	CreatedAt      string          `json:"created_at"`
 	UpdatedAt      *string         `json:"updated_at"`
-	// Version starts at 1 and is incremented on every change, manual (PUT /
-	// PATCH) or automatic (a transaction moving the balance). PUT/PATCH must
+	// Version starts at 1 and is incremented on every change, manual (PUT) or
+	// automatic (a transaction moving the balance). PUT must
 	// send the version they last read (If-Match or "version").
 	Version int64 `json:"version"`
 	Scale   int   `json:"-"` // minor-unit digits used for the *_minor values

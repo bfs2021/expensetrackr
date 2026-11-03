@@ -2046,7 +2046,7 @@ components:
           - { index: 0, status: valid }
           - index: 1
             status: failed
-            error: { message: validation failed, code: validation_failed, fields: { type: 'balance_adjustment transactions are created automatically when a balance amount is edited (PUT/PATCH /api/balances/:uid); they cannot be created or changed here' } }
+            error: { message: validation failed, code: validation_failed, fields: { type: 'balance_adjustment transactions are created automatically when a balance amount is edited (PUT /api/balances/:uid); they cannot be created or changed here' } }
         balances: []
     TransactionInputExpense:
       summary: Expense with a category

@@ -141,8 +141,8 @@ func (s *Store) UpdateBalance(ctx context.Context, id int64, fn func(cur balance
 }
 
 // UpdateBalanceWith loads balance id, passes it to fn and stores what fn
-// returns, in one database transaction. This is the manual edit path (PUT /
-// PATCH): the amounts fn returns overwrite whatever transactions have done to
+// returns, in one database transaction. This is the manual edit path (PUT): the
+// amounts fn returns overwrite whatever transactions have done to
 // the balance. ID, UID and CreatedAt are preserved, UpdatedAt is set to now
 // (UTC) and Version is incremented. A change of the balance (asset) or debt
 // (liability) amount is recorded as a balance_adjustment transaction in the

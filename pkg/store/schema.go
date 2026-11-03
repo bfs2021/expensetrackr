@@ -47,7 +47,7 @@ package store
 //     be negative (overpaid, in credit) and may exceed the limit (reported as
 //     over_limit by the API); limit >= 0.
 //   - version: optimistic-locking counter, 1 on insert, +1 on every change
-//     (manual PUT/PATCH or a transaction moving the balance).
+//     (manual PUT or a transaction moving the balance).
 //
 // Table "users": one row per person.
 //   - uid: server-assigned UUID v4, immutable, unique (FK target).
