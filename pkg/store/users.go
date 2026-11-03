@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"strings"
-	"time"
 
 	"github.com/nutmos/expensetrackr/pkg/common_type"
 	"github.com/nutmos/expensetrackr/pkg/user"
@@ -65,7 +64,7 @@ func (s *Store) CreateUser(ctx context.Context, u *user.User) error {
 		return err
 	}
 	u.UID = uid.String()
-	u.CreatedAt = time.Now().UTC().Format(time.RFC3339)
+	u.CreatedAt = s.nowRFC3339()
 	u.UpdatedAt, u.EmailVerifiedAt, u.PasswordHash, u.PasswordUpdated, u.LastLoginAt = nil, nil, nil, nil, nil
 	u.HasPassword = false
 	if u.Status == "" {
@@ -132,7 +131,7 @@ func (s *Store) UpdateUser(ctx context.Context, id int64, fn func(cur user.User)
 	if err != nil {
 		return user.User{}, err
 	}
-	now := time.Now().UTC().Format(time.RFC3339)
+	now := s.nowRFC3339()
 	// Keep everything the profile API does not own.
 	next.ID, next.UID, next.CreatedAt, next.UpdatedAt = cur.ID, cur.UID, cur.CreatedAt, &now
 	next.Status, next.PasswordHash, next.PasswordUpdated, next.LastLoginAt = cur.Status, cur.PasswordHash, cur.PasswordUpdated, cur.LastLoginAt
@@ -183,7 +182,7 @@ func (s *Store) SetPasswordHash(ctx context.Context, uid string, hash *string) e
 	if hash != nil && *hash == "" {
 		return errors.New("set password hash: empty hash")
 	}
-	now := time.Now().UTC().Format(time.RFC3339)
+	now := s.nowRFC3339()
 	var stamp any = now
 	if hash == nil {
 		stamp = nil
@@ -218,7 +217,7 @@ func (s *Store) CreateIdentity(ctx context.Context, id *user.Identity) error {
 		return err
 	}
 	id.UID = uid.String()
-	id.CreatedAt = time.Now().UTC().Format(time.RFC3339)
+	id.CreatedAt = s.nowRFC3339()
 	id.LastUsedAt = nil
 	res, err := s.db.ExecContext(ctx,
 		`INSERT INTO user_identities (uid, user_uid, provider, provider_subject, email, created_at)

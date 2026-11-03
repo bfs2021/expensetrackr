@@ -5,7 +5,6 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
-	"time"
 
 	"github.com/nutmos/expensetrackr/pkg/balance"
 	"github.com/nutmos/expensetrackr/pkg/common_type"
@@ -54,7 +53,7 @@ func (s *Store) CreateBalance(ctx context.Context, b *balance.Balance) error {
 		return err
 	}
 	b.UID = uid
-	b.CreatedAt = time.Now().UTC().Format(time.RFC3339)
+	b.CreatedAt = s.nowRFC3339()
 	b.UpdatedAt, b.Version = nil, 1
 	res, err := s.db.ExecContext(ctx,
 		`INSERT INTO balances (uid, name, type, currency, description, amount_scale, balance_minor, debt_minor, limit_minor, created_at)
@@ -178,7 +177,7 @@ func (s *Store) UpdateBalanceWith(ctx context.Context, id int64, opts WriteOptio
 	if !ok {
 		return balance.Balance{}, fmt.Errorf("unknown currency %q", next.Currency)
 	}
-	now := time.Now().UTC().Format(time.RFC3339)
+	now := s.nowRFC3339()
 	next.ID, next.UID, next.CreatedAt, next.UpdatedAt = cur.ID, cur.UID, cur.CreatedAt, &now
 	next.Version = cur.Version + 1
 	// The type is immutable after creation (callers reject a change with 422

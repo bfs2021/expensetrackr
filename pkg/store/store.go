@@ -45,9 +45,15 @@ type WriteOptions struct {
 
 // Store wraps the SQLite database.
 type Store struct {
-	db   *sql.DB
-	path string
+	db  *sql.DB
+	now func() time.Time // clock for created_at/updated_at; tests may override
 }
+
+// busyTimeoutMS is how long SQLite waits on a locked database before failing.
+const busyTimeoutMS = 5000
+
+// nowRFC3339 is the current time from s.now, in UTC, formatted for storage.
+func (s *Store) nowRFC3339() string { return ts(s.now()) }
 
 // Open opens (creating if needed) the SQLite database at path and brings its
 // schema up to date (see migrate). A database created before the schema
@@ -60,7 +66,7 @@ func Open(path string) (*Store, error) {
 		}
 	}
 	q := url.Values{}
-	q.Add("_pragma", "busy_timeout(5000)")
+	q.Add("_pragma", fmt.Sprintf("busy_timeout(%d)", busyTimeoutMS))
 	q.Add("_pragma", "journal_mode(WAL)")
 	q.Add("_pragma", "foreign_keys(1)")
 	dsn := "file:" + path + "?" + q.Encode()
@@ -75,7 +81,7 @@ func Open(path string) (*Store, error) {
 		db.Close()
 		return nil, fmt.Errorf("database %s: %w", path, err)
 	}
-	return &Store{db: db, path: path}, nil
+	return &Store{db: db, now: time.Now}, nil
 }
 
 // Close closes the database.
@@ -98,7 +104,7 @@ func (s *Store) Create(ctx context.Context, e *transaction.Transaction) error {
 		return fmt.Errorf("insert transaction: %w", err)
 	}
 	defer func() { _ = tx.Rollback() }() // no-op after Commit
-	next, err := insertTx(ctx, tx, *e, time.Now().UTC().Format(time.RFC3339))
+	next, err := insertTx(ctx, tx, *e, s.nowRFC3339())
 	if err != nil {
 		return err
 	}
@@ -217,11 +223,6 @@ func (s *Store) GetByUID(ctx context.Context, uid string) (transaction.Transacti
 	return e, err
 }
 
-// Update is UpdateWith without a version check.
-func (s *Store) Update(ctx context.Context, id int64, fn func(cur transaction.Transaction) (transaction.Transaction, error)) (transaction.Transaction, error) {
-	return s.UpdateWith(ctx, id, WriteOptions{}, fn)
-}
-
 // UpdateWith loads row id from transactions, passes it to fn and stores the
 // transaction fn returns, all inside one database transaction (so a PATCH's
 // read-modify-write is atomic). fn receives the current row and returns the
@@ -269,7 +270,7 @@ func (s *Store) UpdateWith(ctx context.Context, id int64, opts WriteOptions, fn 
 	if !ok {
 		return transaction.Transaction{}, fmt.Errorf("unknown currency %q", next.Currency)
 	}
-	now := time.Now().UTC().Format(time.RFC3339)
+	now := s.nowRFC3339()
 	next.ID, next.UID, next.CreatedAt, next.UpdatedAt = cur.ID, cur.UID, cur.CreatedAt, &now
 	next.Version, next.AdjustsBalances = cur.Version+1, cur.AdjustsBalances
 
@@ -293,11 +294,6 @@ func (s *Store) UpdateWith(ctx context.Context, id int64, opts WriteOptions, fn 
 		return transaction.Transaction{}, fmt.Errorf("update transaction: %w", err)
 	}
 	return next, nil
-}
-
-// Delete is DeleteWith without a version check.
-func (s *Store) Delete(ctx context.Context, id int64) error {
-	return s.DeleteWith(ctx, id, WriteOptions{})
 }
 
 // DeleteWith removes one row from transactions and reverses its balance
@@ -326,7 +322,7 @@ func (s *Store) DeleteWith(ctx context.Context, id int64, opts WriteOptions) err
 	if _, err := tx.ExecContext(ctx, `DELETE FROM transactions WHERE id = ?`, id); err != nil {
 		return fmt.Errorf("delete transaction: %w", err)
 	}
-	if err := applyBalanceEffects(ctx, tx, &cur, nil, time.Now().UTC().Format(time.RFC3339)); err != nil {
+	if err := applyBalanceEffects(ctx, tx, &cur, nil, s.nowRFC3339()); err != nil {
 		return err
 	}
 	if err := tx.Commit(); err != nil {

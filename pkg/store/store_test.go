@@ -222,7 +222,7 @@ func TestUpdateNotFound(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer st.Close()
-	_, err = st.Update(context.Background(), 42, func(cur transaction.Transaction) (transaction.Transaction, error) { return cur, nil })
+	_, err = st.UpdateWith(context.Background(), 42, WriteOptions{}, func(cur transaction.Transaction) (transaction.Transaction, error) { return cur, nil })
 	if !errors.Is(err, ErrNotFound) {
 		t.Errorf("got %v, want ErrNotFound", err)
 	}
