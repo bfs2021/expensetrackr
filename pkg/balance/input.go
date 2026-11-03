@@ -12,8 +12,8 @@ import (
 	"github.com/nutmos/expensetrackr/pkg/validate"
 )
 
-// Input is the payload for POST and PUT /api/balances (and the merge target
-// for PATCH). An amount that is absent, null or "" counts as not provided.
+// Input is the payload for POST and PUT /api/balances. An amount that is absent, null
+// or "" counts as not provided.
 // UID is accepted so clients can round-trip a previous response; it is
 // ignored (the server assigns and never changes it).
 type Input struct {

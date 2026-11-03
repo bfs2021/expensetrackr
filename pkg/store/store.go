@@ -39,7 +39,7 @@ var ErrReadOnly = errors.New("balance adjustments are created automatically and 
 type WriteOptions struct {
 	// Version, if > 0, must equal the stored version or the write fails with
 	// ErrVersionConflict. 0 skips the check (internal callers and tests; the
-	// API always sends the client's version for PUT/PATCH).
+	// API always sends the client's version for PUT).
 	Version int64
 }
 
@@ -224,7 +224,7 @@ func (s *Store) GetByUID(ctx context.Context, uid string) (transaction.Transacti
 }
 
 // UpdateWith loads row id from transactions, passes it to fn and stores the
-// transaction fn returns, all inside one database transaction (so a PATCH's
+// transaction fn returns, all inside one database transaction (so a PUT's
 // read-modify-write is atomic). fn receives the current row and returns the
 // new, already validated values; an error from fn aborts the update and is
 // returned unchanged. ID, UID and CreatedAt are preserved, UpdatedAt is set

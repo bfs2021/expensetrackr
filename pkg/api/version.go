@@ -13,7 +13,7 @@ import (
 //
 // Every balance and transaction has a version (1 on create, +1 on every
 // change). Responses for a single record carry it in the JSON "version" field
-// and in an ETag header ("3"). PUT and PATCH must say which version they were
+// and in an ETag header ("3"). PUT must say which version they were
 // based on, either as an If-Match header (preferred; `"3"`, and `W/"3"` is
 // accepted too) or as "version" in the JSON body:
 //
