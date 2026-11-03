@@ -20,42 +20,10 @@ func fieldErrs(t *testing.T, err error) map[string]string {
 
 func sp(s string) *string { return &s }
 
-func TestNormalizePreferences(t *testing.T) {
-	ok := map[string]string{
-		``:                          `{}`,
-		`null`:                      `{}`,
-		`{}`:                        `{}`,
-		` { "a" : [1, 2], "b":{} }`: `{"a":[1,2],"b":{}}`,
-	}
-	for in, want := range ok {
-		got, msg := NormalizePreferences(json.RawMessage(in))
-		if msg != "" || string(got) != want {
-			t.Errorf("%q: got %q %q, want %q", in, got, msg, want)
-		}
-	}
-	for in, want := range map[string]string{
-		`[]`:         "must be a JSON object",
-		`"x"`:        "must be a JSON object",
-		`42`:         "must be a JSON object",
-		`true`:       "must be a JSON object",
-		`{"a":}`:     "must be valid JSON",
-		`{"a":1} {}`: "must be valid JSON",
-		`{`:          "must be valid JSON",
-	} {
-		if _, msg := NormalizePreferences(json.RawMessage(in)); msg != want {
-			t.Errorf("%q: msg %q, want %q", in, msg, want)
-		}
-	}
-	big := `{"k":"` + strings.Repeat("x", MaxPreferencesSize) + `"}`
-	if _, msg := NormalizePreferences(json.RawMessage(big)); !strings.Contains(msg, "at most") {
-		t.Errorf("oversized: %q", msg)
-	}
-}
-
 func TestValidate(t *testing.T) {
 	u, err := Input{DisplayName: "  Nat  ", Username: sp(" Nat.E "), Email: sp(" Nat@Example.COM ")}.Validate()
 	if err != nil || u.DisplayName != "Nat" || *u.Username != "nat.e" || *u.Email != "nat@example.com" ||
-		string(u.Preferences) != "{}" || u.Status != StatusActive {
+		u.Preferences != (Preferences{}) || u.Status != StatusActive {
 		t.Fatalf("normalize: %+v %v", u, err)
 	}
 	// "" username/email mean none.
@@ -94,20 +62,20 @@ func patchOf(t *testing.T, s string) map[string]json.RawMessage {
 
 func TestApplyPatch(t *testing.T) {
 	stored, _ := Input{DisplayName: "Nat", Username: sp("nat"), Email: sp("nat@example.com"),
-		Preferences: json.RawMessage(`{"theme":"dark","currency":"THB"}`)}.Validate()
+		Preferences: json.RawMessage(`{"base_currency":"THB"}`)}.Validate()
 
 	in := stored.Input()
-	if err := in.ApplyPatch(patchOf(t, `{"preferences":{"theme":"light"},"uid":"x","status":"disabled","has_password":true}`)); err != nil {
+	if err := in.ApplyPatch(patchOf(t, `{"preferences":{"base_currency":"EUR"},"uid":"x","status":"disabled","has_password":true}`)); err != nil {
 		t.Fatal(err)
 	}
 	u, err := in.Validate()
 	// Whole-object replace: "currency" is gone. Read-only fields are ignored.
-	if err != nil || string(u.Preferences) != `{"theme":"light"}` || *u.Username != "nat" || u.Status != StatusActive {
+	if err != nil || u.Preferences.BaseCurrency != "EUR" || *u.Username != "nat" || u.Status != StatusActive {
 		t.Errorf("replace prefs: %+v %v", u, err)
 	}
 	in = stored.Input()
 	_ = in.ApplyPatch(patchOf(t, `{"preferences":null,"email":null,"username":""}`))
-	if u, err := in.Validate(); err != nil || string(u.Preferences) != "{}" || u.Email != nil || u.Username != nil {
+	if u, err := in.Validate(); err != nil || u.Preferences != (Preferences{}) || u.Email != nil || u.Username != nil {
 		t.Errorf("null/empty clears: %+v %v", u, err)
 	}
 	in = stored.Input()
@@ -130,7 +98,7 @@ func TestApplyPatch(t *testing.T) {
 
 func TestUserJSONNeverHasHash(t *testing.T) {
 	h := "$argon2id$secret"
-	b, _ := json.Marshal(User{UID: "u", DisplayName: "x", Preferences: json.RawMessage(`{}`), PasswordHash: &h, HasPassword: true})
+	b, _ := json.Marshal(User{UID: "u", DisplayName: "x", PasswordHash: &h, HasPassword: true})
 	if strings.Contains(string(b), "argon2id") || strings.Contains(string(b), "password_hash") || !strings.Contains(string(b), `"has_password":true`) {
 		t.Errorf("json: %s", b)
 	}

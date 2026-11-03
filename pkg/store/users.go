@@ -73,7 +73,7 @@ func (s *Store) CreateUser(ctx context.Context, u *user.User) error {
 	res, err := s.db.ExecContext(ctx,
 		`INSERT INTO users (uid, username, email, display_name, preferences, status, created_at)
 		 VALUES (?, ?, ?, ?, ?, ?, ?)`,
-		u.UID, nullStr(u.Username), nullStr(u.Email), u.DisplayName, string(u.Preferences), string(u.Status), u.CreatedAt)
+		u.UID, nullStr(u.Username), nullStr(u.Email), u.DisplayName, u.Preferences.StoredJSON(), string(u.Status), u.CreatedAt)
 	if err != nil {
 		if m := mapUserErr(err); m != err {
 			return m
@@ -143,7 +143,7 @@ func (s *Store) UpdateUser(ctx context.Context, id int64, fn func(cur user.User)
 	if _, err := tx.ExecContext(ctx,
 		`UPDATE users SET username = ?, email = ?, email_verified_at = ?, display_name = ?, preferences = ?, updated_at = ?
 		 WHERE id = ?`,
-		nullStr(next.Username), nullStr(next.Email), nullStr(next.EmailVerifiedAt), next.DisplayName, string(next.Preferences), now, id); err != nil {
+		nullStr(next.Username), nullStr(next.Email), nullStr(next.EmailVerifiedAt), next.DisplayName, next.Preferences.StoredJSON(), now, id); err != nil {
 		if m := mapUserErr(err); m != err {
 			return user.User{}, m
 		}
@@ -289,7 +289,8 @@ func scanUser(r scanner) (user.User, error) {
 	var u user.User
 	var username, email, verified, hash, pwUpdated, lastLogin, updated sql.NullString
 	var prefs, status string
-	if err := r.Scan(&u.ID, &u.UID, &username, &email, &verified, &u.DisplayName, &prefs,
+	var err error
+	if err = r.Scan(&u.ID, &u.UID, &username, &email, &verified, &u.DisplayName, &prefs,
 		&hash, &pwUpdated, &status, &lastLogin, &u.CreatedAt, &updated); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return u, err
@@ -299,7 +300,9 @@ func scanUser(r scanner) (user.User, error) {
 	u.Username, u.Email, u.EmailVerifiedAt = strPtr(username), strPtr(email), strPtr(verified)
 	u.PasswordHash, u.PasswordUpdated, u.LastLoginAt, u.UpdatedAt = strPtr(hash), strPtr(pwUpdated), strPtr(lastLogin), strPtr(updated)
 	u.HasPassword = u.PasswordHash != nil
-	u.Preferences = []byte(prefs)
+	if u.Preferences, err = user.ParseStoredPreferences([]byte(prefs)); err != nil {
+		return u, err
+	}
 	u.Status = user.Status(status)
 	return u, nil
 }

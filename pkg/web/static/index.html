@@ -49,6 +49,7 @@
       <a href="/transactions" id="tab-transactions" class="tab">Transactions</a>
       <a href="/balances" id="tab-balances" class="tab">Balances</a>
       <a href="/categories" id="tab-categories" class="tab">Categories</a>
+      <a href="/settings" id="tab-settings" class="tab">Settings</a>
       <a href="/swagger/" target="_blank" rel="noopener" class="tab tab-docs">API docs</a>
     </nav>
 
@@ -311,6 +312,25 @@
     </section>
     </div>
 
+    <!-- /settings: the signed-in user's preferences -->
+    <div id="view-settings" class="view" hidden>
+    <section class="card form-card">
+      <h2>Settings</h2>
+      <p class="muted">Your personal preferences. Other users have their own.</p>
+      <form id="settings-form" novalidate>
+        <label>Base currency
+          <select id="s-base-currency" name="base_currency" required><option value="">Select a currency…</option></select>
+          <small class="muted">The currency you think in, used for totals and conversions.</small>
+          <small class="err" data-for="base_currency"></small>
+        </label>
+        <div class="actions">
+          <button type="submit" id="s-submit-btn">Save settings</button>
+          <span id="s-form-status" role="status"></span>
+        </div>
+      </form>
+    </section>
+    </div>
+
     <div id="view-notfound" class="view" hidden>
     <section class="card">
       <h2>Page not found</h2>
@@ -323,5 +343,6 @@
   <script src="/static/transactions.js"></script>
   <script src="/static/balances.js"></script>
   <script src="/static/categories.js"></script>
+  <script src="/static/settings.js"></script>
 </body>
 </html>

@@ -649,7 +649,7 @@ paths:
         content:
           application/json:
             schema: { $ref: '#/components/schemas/UserInput' }
-            example: { display_name: Nattapong, username: nutmos, email: n@example.com, preferences: { currency: THB } }
+            example: { display_name: Alex Example, username: alex, email: alex@example.com, preferences: { base_currency: THB } }
       responses:
         '401': { $ref: '#/components/responses/Unauthorized' }
         '201':
@@ -702,13 +702,13 @@ paths:
       tags: [users]
       operationId: replaceUser
       summary: Replace a user profile
-      description: Full replace of the profile fields. Omitted `username`/`email` are removed and omitted `preferences` becomes `{}`. Read-only fields are ignored. Not versioned.
+      description: Full replace of the profile fields. Omitted `username`/`email` are removed and omitted `preferences` resets every preference to its default. Read-only fields are ignored. Not versioned.
       requestBody:
         required: true
         content:
           application/json:
             schema: { $ref: '#/components/schemas/UserInput' }
-            example: { display_name: Nattapong E., username: nutmos, preferences: { currency: SGD, theme: dark } }
+            example: { display_name: Alex E., username: alex, preferences: { base_currency: SGD } }
       responses:
         '401': { $ref: '#/components/responses/Unauthorized' }
         '200':
@@ -727,7 +727,7 @@ paths:
       summary: Partially update a user profile
       description: |
         Only the fields present change. `preferences` **replaces** the whole object (no deep merge;
-        `null` resets it to `{}`). `username`/`email`: `null` or `""` removes it. `display_name: null` is a 422.
+        `null` resets every preference to its default). `username`/`email`: `null` or `""` removes it. `display_name: null` is a 422.
         Read-only fields are ignored. A patch with nothing else is a 400.
       requestBody:
         required: true
@@ -737,7 +737,7 @@ paths:
             examples:
               preferences:
                 summary: Replace preferences
-                value: { preferences: { currency: SGD, week_starts_on: monday } }
+                value: { preferences: { base_currency: SGD } }
               removeEmail:
                 summary: Remove the email
                 value: { email: null }
@@ -781,6 +781,56 @@ paths:
             application/json:
               schema: { $ref: '#/components/schemas/IdentityList' }
         '400': { $ref: '#/components/responses/BadUid' }
+        '404': { $ref: '#/components/responses/UserNotFound' }
+        '500': { $ref: '#/components/responses/InternalError' }
+
+  /api/users/{uid}/preferences:
+    parameters:
+      - $ref: '#/components/parameters/UserUid'
+    get:
+      tags: [users]
+      operationId: getUserPreferences
+      summary: Get your preferences
+      description: Only for the logged-in user's own uid (403 otherwise). Unset keys show their default.
+      responses:
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '200':
+          description: The effective preferences.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Preferences' }
+        '400': { $ref: '#/components/responses/BadUid' }
+        '403': { $ref: '#/components/responses/PreferencesForbidden' }
+        '404': { $ref: '#/components/responses/UserNotFound' }
+        '500': { $ref: '#/components/responses/InternalError' }
+    put:
+      tags: [users]
+      operationId: replaceUserPreferences
+      summary: Replace your preferences
+      description: |
+        Replaces the whole preferences object; omitted keys go back to their defaults (`{}` resets
+        everything). Only for the logged-in user's own uid. Any invalid preference (unsupported
+        `base_currency`, wrong type, unknown key, not an object) is a **400** with `fields`.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/Preferences' }
+            example: { base_currency: SGD }
+      responses:
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '200':
+          description: Updated; the effective preferences.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Preferences' }
+        '400':
+          description: Malformed body or invalid preferences.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+              example: { error: invalid preferences, fields: { base_currency: 'must be a supported ISO 4217 currency code (see /api/currencies)' } }
+        '403': { $ref: '#/components/responses/PreferencesForbidden' }
         '404': { $ref: '#/components/responses/UserNotFound' }
         '500': { $ref: '#/components/responses/InternalError' }
 
@@ -1117,6 +1167,12 @@ components:
       content:
         application/json:
           schema: { $ref: '#/components/schemas/Error' }
+    PreferencesForbidden:
+      description: The uid is not the logged-in user's (preferences are personal).
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+          example: { error: preferences can only be read or changed by their own user }
     UnsupportedMediaType:
       description: A request body that is not `Content-Type application/json`.
       content:
@@ -1879,9 +1935,19 @@ components:
 
     Preferences:
       type: object
-      description: Free-form client preferences, always a JSON object (at most 32 KiB compacted).
-      additionalProperties: true
-      example: { currency: THB }
+      description: |
+        The user's preferences, stored server-side as one JSON object per user. Responses always
+        contain every key with its effective value (defaults filled in). On input every key is
+        optional (omitted = default) and unknown keys are rejected; more keys will be added over time.
+      additionalProperties: false
+      required: [base_currency]
+      properties:
+        base_currency:
+          type: string
+          description: ISO 4217 code from `GET /api/currencies` (trimmed and upper-cased on input). Default `USD`; `""` also means the default.
+          pattern: '^[A-Za-z]{3}$'
+          example: THB
+      example: { base_currency: THB }
     User:
       type: object
       description: A user profile. The password hash is never returned; `has_password` says whether one is set.
@@ -1893,15 +1959,15 @@ components:
           nullable: true
           description: Lowercase, 3–32 characters (letters, digits, `.`, `_`, `-`; starts with a letter or digit). Unique case-insensitively.
           pattern: '^[a-z0-9][a-z0-9._-]{2,31}$'
-          example: nutmos
+          example: alex
         email:
           type: string
           format: email
           nullable: true
           description: Lowercased; unique.
-          example: n@example.com
+          example: alex@example.com
         email_verified_at: { type: string, format: date-time, nullable: true, description: Reserved for a future verification flow., example: null }
-        display_name: { type: string, maxLength: 100, example: Nattapong }
+        display_name: { type: string, maxLength: 100, example: Alex Example }
         preferences: { $ref: '#/components/schemas/Preferences' }
         status:
           type: string
@@ -1933,7 +1999,7 @@ components:
           type: object
           additionalProperties: true
           nullable: true
-          description: Omitted or `null` means `{}`. Anything other than a JSON object is a 422 (max 32 KiB).
+          description: 'A `Preferences` object. Omitted or `null` means all defaults. Not an object, an unknown key or an unsupported `base_currency` is a 422 (field `preferences` or `preferences.<key>`).'
         uid: { type: string, description: Ignored. }
         status: { type: string, description: Ignored. }
         has_password: { type: boolean, description: Ignored. }
@@ -1955,7 +2021,7 @@ components:
           type: object
           additionalProperties: true
           nullable: true
-          description: Replaces the whole object; `null` resets it to `{}`.
+          description: 'Replaces the whole object (see `Preferences`); `null` resets every preference to its default. Invalid values are a 422.'
         uid: { type: string, description: Ignored. }
         status: { type: string, description: Ignored. }
         has_password: { type: boolean, description: Ignored. }
@@ -2190,11 +2256,11 @@ components:
       summary: User profile
       value:
         uid: 3525dd1f-ae96-4c71-b996-06a43679cfa2
-        username: nutmos
-        email: n@example.com
+        username: alex
+        email: alex@example.com
         email_verified_at: null
-        display_name: Nattapong
-        preferences: { currency: THB }
+        display_name: Alex Example
+        preferences: { base_currency: THB }
         status: active
         has_password: false
         password_updated_at: null

@@ -249,8 +249,11 @@ Rules linking transactions and categories:
 
 User profiles. Each has a `uid`, a required
 `display_name` and an optional `username` and `email`, both unique and
-case-insensitive. `preferences` is a free-form **JSON object**, checked by
-both the app and SQLite (`json_valid`, `json_type = 'object'`), up to 32 KiB.
+case-insensitive. `preferences` is one **JSON object** per user (checked by SQLite with
+`json_valid`, `json_type = 'object'`), modelled as a typed struct in Go. For
+now it has one key, `base_currency` (default `USD`); see
+[docs/user-profile.md](docs/user-profile.md#preferences). Each user edits
+their own on the **Settings** page.
 
 There are also fields reserved for future login: `password_hash` (never
 exposed; the API shows only `has_password`), `password_updated_at`,
@@ -441,20 +444,22 @@ only on validation, conflict and duplicate-name errors.
 | POST   | `/api/auth/logout`     | 204 | Deletes the session, clears the cookie |
 | GET    | `/api/auth/me`         | 200 + user | 401 when signed out (`code: setup_required` before the first account exists) |
 | PUT    | `/api/auth/password`   | 204 | `current_password`, `new_password`; logs out all other sessions |
-| POST   | `/api/users`           | 201 + user, `Location: /api/users/<uid>` | `display_name` required; `username`, `email`, `preferences` (JSON object) optional. 422 invalid, 409 duplicate username/email, 400 unknown fields (incl. `password`, `password_hash`) |
+| POST   | `/api/users`           | 201 + user, `Location: /api/users/<uid>` | `display_name` required; `username`, `email`, `preferences` (object, see below) optional. 422 invalid, 409 duplicate username/email, 400 unknown fields (incl. `password`, `password_hash`) |
 | GET    | `/api/users`           | 200 `{"users":[...],"count":n}` | Oldest first |
 | GET    | `/api/users/:uid`      | 200 + user | Never includes `password_hash`; `has_password` instead |
-| PUT    | `/api/users/:uid`      | 200 + updated user | Full replace of profile fields (omitted username/email removed, preferences → `{}`). Read-only fields in the body are ignored |
-| PATCH  | `/api/users/:uid`      | 200 + updated user | Partial; `preferences` **replaces** the whole object (`null` → `{}`); `username`/`email` `null` removes |
+| PUT    | `/api/users/:uid`      | 200 + updated user | Full replace of profile fields (omitted username/email removed, preferences → defaults). Read-only fields in the body are ignored |
+| PATCH  | `/api/users/:uid`      | 200 + updated user | Partial; `preferences` **replaces** the whole object (`null` → defaults); `username`/`email` `null` removes |
 | DELETE | `/api/users/:uid`      | 204 | Also deletes linked identities |
 | GET    | `/api/users/:uid/identities` | 200 `{"identities":[...],"count":n}` | Read-only SSO links (empty until SSO exists) |
+| GET    | `/api/users/:uid/preferences` | 200 `{"base_currency":"USD"}` | Your own preferences (defaults filled in); another user's uid is 403 |
+| PUT    | `/api/users/:uid/preferences` | 200 + preferences | Replaces the whole object (omitted keys → defaults). Own uid only; unsupported `base_currency` or unknown key is a 400 |
 | GET    | `/api/currencies`    | 200 `{"currencies":[{"code":"THB","name":"Baht","scale":2,"flag":"🇹🇭"},...],"count":n}` | Supported ISO 4217 codes (from `pkg/money`), sorted by code, with a display-only flag emoji (see below); the web page's currency dropdowns use it |
 | GET    | `/api/exchange-rates?from=USD&to=THB&date=YYYY-MM-DD` | 200 `{"from":"USD","to":"THB","rate":"33.615","date":"2026-10-12","source":"frankfurter"}` | Rate preview (cached Frankfurter / ECB rate; `date` optional = latest). 400 bad query, 422 unsupported pair, 503/502 Frankfurter down. See [docs/exchange-rates.md](docs/exchange-rates.md) |
 | GET    | `/api/healthz`       | 200 `{"status":"ok"}` | |
 | GET    | `/api/openapi.yaml`  | 200 the OpenAPI 3.0 document | Hand-written spec, embedded in the binary |
 | GET    | `/api/openapi.json`  | 200 the same document as JSON | |
 | GET    | `/swagger/`, `/swagger` | Swagger UI (HTML) | `/swagger` redirects to `/swagger/`. Assets are vendored and embedded (offline; no CDN) |
-| GET    | `/`, `/transactions`, `/balances`, `/categories` | HTML page (list) | Same `index.html` for every page path; the client-side router picks the view. Static assets under `/static/` |
+| GET    | `/`, `/transactions`, `/balances`, `/categories`, `/settings` | HTML page (list) | Same `index.html` for every page path; the client-side router picks the view. Static assets under `/static/` |
 | GET    | `/favicon.ico` | 204 | No icon; answered so browsers do not log a 404 |
 | GET    | `/<res>/new`, `/<res>/:uid/edit` | HTML page (add / edit form) | `<res>` = `transactions`, `balances` or `categories`. `:uid` must be UUID-shaped (any case), else 404; an unknown uid is reported by the page itself. Other paths → 404 JSON |
 
@@ -601,7 +606,7 @@ pkg/transaction/                   transaction domain model + validation (no I/O
   transaction.go                   Transaction, CreateInput, Validate, ParseTimestamp
   input.go                         Transaction.Input (stored record -> CreateInput)
 pkg/category/                      category domain model (Type expense|income, Input, Validate)
-pkg/user/                          user profile model: Input, Validate (preferences JSON object), ApplyPatch, Identity
+pkg/user/                          user profile model: Input, Validate, ApplyPatch, Preferences (typed JSON settings), Identity
 pkg/balance/                       balance domain model + per-type validation (no I/O)
   balance.go                       Type, Balance, Input, Validate, ComputeTotals
 pkg/store/                         persistence (modernc.org/sqlite)
@@ -625,7 +630,7 @@ pkg/api/                           Gin routes and handlers
   *_test.go                        handler tests (throwaway DB per test)
 pkg/web/embed.go                   embeds web/static into the binary
 pkg/web/static/                    index.html (all views), style.css, router.js (history router + shared helpers),
-                                   transactions.js, balances.js, categories.js (list + form page each)
+                                   transactions.js, balances.js, categories.js (list + form page each), settings.js
 pkg/apidoc/                        the API description, embedded into the binary
   openapi.yaml                     hand-written OpenAPI 3.0 spec (the source of truth for the docs)
   apidoc.go                        serves GET /api/openapi.yaml, /api/openapi.json and /swagger/

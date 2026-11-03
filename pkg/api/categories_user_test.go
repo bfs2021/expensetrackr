@@ -20,7 +20,7 @@ import (
 func asUser(t *testing.T, router http.Handler, st *store.Store, name string) http.Handler {
 	t.Helper()
 	ctx := context.Background()
-	u := user.User{Username: &name, DisplayName: name, Preferences: []byte("{}")}
+	u := user.User{Username: &name, DisplayName: name}
 	if err := st.RegisterUser(ctx, &u, "$2a$04$unused", false); err != nil {
 		t.Fatal(err)
 	}

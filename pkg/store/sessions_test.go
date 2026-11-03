@@ -23,18 +23,18 @@ func TestRegisterAndSessions(t *testing.T) {
 	if ok, _ := st.HasPasswordUser(ctx); ok {
 		t.Fatal("fresh db has password user")
 	}
-	u := user.User{Username: strp("alice"), DisplayName: "Alice", Preferences: []byte("{}")}
+	u := user.User{Username: strp("alice"), DisplayName: "Alice"}
 	if err := st.RegisterUser(ctx, &u, "$2a$04$hash", true); err != nil {
 		t.Fatal(err)
 	}
 	if ok, _ := st.HasPasswordUser(ctx); !ok {
 		t.Fatal("no password user after register")
 	}
-	u2 := user.User{Username: strp("bob"), DisplayName: "Bob", Preferences: []byte("{}")}
+	u2 := user.User{Username: strp("bob"), DisplayName: "Bob"}
 	if err := st.RegisterUser(ctx, &u2, "$2a$04$hash", true); !errors.Is(err, ErrRegistrationClosed) {
 		t.Fatalf("second first-run register: %v", err)
 	}
-	u3 := user.User{Username: strp("alice"), DisplayName: "A2", Preferences: []byte("{}")}
+	u3 := user.User{Username: strp("alice"), DisplayName: "A2"}
 	if err := st.RegisterUser(ctx, &u3, "$2a$04$hash", false); !errors.Is(err, ErrDuplicateUsername) {
 		t.Fatalf("duplicate: %v", err)
 	}

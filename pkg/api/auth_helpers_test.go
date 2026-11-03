@@ -24,7 +24,7 @@ func loggedIn(t *testing.T, h http.Handler, st *store.Store) http.Handler {
 		t.Fatal(err)
 	}
 	name := "tester"
-	u := user.User{Username: &name, DisplayName: "Tester", Preferences: []byte("{}")}
+	u := user.User{Username: &name, DisplayName: "Tester"}
 	if err := st.RegisterUser(ctx, &u, hash, true); err != nil {
 		t.Fatalf("seed tester: %v", err)
 	}

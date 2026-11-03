@@ -9,7 +9,7 @@ import (
 func TestPageRoutes(t *testing.T) {
 	h := newTestServer(t)
 	const uid = "0b6c2f7e-3c1a-4d5e-9f00-1234567890ab"
-	ok := []string{"/"}
+	ok := []string{"/", "/settings"}
 	for _, res := range []string{"transactions", "balances", "categories"} {
 		ok = append(ok,
 			"/"+res,

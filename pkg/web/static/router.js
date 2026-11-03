@@ -138,7 +138,7 @@
     const m = match(path);
     document.querySelectorAll(".view").forEach((v) => (v.hidden = true));
     const section = m ? m.r.section : "";
-    for (const s of ["transactions", "balances", "categories"]) {
+    for (const s of ["transactions", "balances", "categories", "settings"]) {
       const tab = $(`#tab-${s}`);
       tab.classList.toggle("active", s === section);
       if (s === section) tab.setAttribute("aria-current", "page"); else tab.removeAttribute("aria-current");

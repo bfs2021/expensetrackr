@@ -23,6 +23,8 @@ func (s *Server) registerPageRoutes(r *gin.Engine) {
 	// Signed-out pages (issue #32): log in, and create account (first run).
 	r.GET("/login", s.index)
 	r.GET("/register", s.index)
+	// The signed-in user's preferences.
+	r.GET("/settings", s.index)
 	for _, res := range pageResources {
 		r.GET("/"+res, s.index)
 		r.GET("/"+res+"/new", s.index)
