@@ -104,7 +104,7 @@ type BulkOutcome struct {
 // uid. With opts.Atomic any failure rolls back everything; with opts.DryRun
 // everything is always rolled back. No network calls happen here: FX rates
 // must already be resolved on the items.
-func (s *Store) CreateBulk(ctx context.Context, items []BulkItem, opts BulkOptions) (BulkOutcome, error) {
+func (s *Store) CreateBulk(ctx context.Context, userUID string, items []BulkItem, opts BulkOptions) (BulkOutcome, error) {
 	out := BulkOutcome{Results: make([]BulkResult, len(items))}
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
@@ -153,7 +153,7 @@ func (s *Store) CreateBulk(ctx context.Context, items []BulkItem, opts BulkOptio
 		if _, err := tx.ExecContext(ctx, `SAVEPOINT bulk_item`); err != nil {
 			return out, fmt.Errorf("bulk insert: %w", err)
 		}
-		next, err := insertTx(ctx, tx, e, now)
+		next, err := insertTx(ctx, tx, userUID, e, now)
 		if err != nil {
 			for _, q := range []string{`ROLLBACK TO bulk_item`, `RELEASE bulk_item`} {
 				if _, rerr := tx.ExecContext(ctx, q); rerr != nil {
@@ -181,7 +181,7 @@ func (s *Store) CreateBulk(ctx context.Context, items []BulkItem, opts BulkOptio
 		}
 	}
 	for _, uid := range touched {
-		b, err := balanceByUIDTx(ctx, tx, uid)
+		b, err := balanceByUIDTx(ctx, tx, userUID, uid)
 		if errors.Is(err, ErrNotFound) {
 			continue
 		}

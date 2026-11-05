@@ -19,9 +19,9 @@ func (s *Server) registerCategoryRoutes(api *gin.RouterGroup) {
 	api.DELETE("/categories/:uid", s.deleteCategory)
 }
 
-// sessionUserUID is the uid of the logged-in user. Categories are per user:
-// every category route (and transaction category validation) is scoped to it.
-// requireAuth guarantees a user on these routes; "" would match no categories.
+// sessionUserUID is the uid of the logged-in user. Categories, transactions
+// and balances are per user: every owned-data route is scoped to it.
+// requireAuth guarantees a user on these routes; "" would match no rows.
 func sessionUserUID(c *gin.Context) string {
 	u, _ := currentUser(c)
 	return u.UID

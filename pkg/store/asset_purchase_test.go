@@ -16,7 +16,7 @@ func TestAssetPurchaseEffects(t *testing.T) {
 		e := f.create(f.tx("asset_purchase", "200", "THB", f.pay, &f.gold))
 		f.want(f.pay, "800.00", 2)
 		f.want(f.gold, "700.00", 2)
-		if err := f.st.DeleteWith(ctx, e.ID, WriteOptions{}); err != nil {
+		if err := f.st.DeleteWith(ctx, f.userUID, e.ID, WriteOptions{}); err != nil {
 			t.Fatal(err)
 		}
 		f.want(f.pay, "1000.00", 3)
@@ -27,7 +27,7 @@ func TestAssetPurchaseEffects(t *testing.T) {
 		e := f.create(f.tx("asset_purchase", "300", "THB", f.card, &f.gold))
 		f.want(f.card, "400.00", 2)
 		f.want(f.gold, "800.00", 2)
-		if err := f.st.DeleteWith(ctx, e.ID, WriteOptions{}); err != nil {
+		if err := f.st.DeleteWith(ctx, f.userUID, e.ID, WriteOptions{}); err != nil {
 			t.Fatal(err)
 		}
 		f.want(f.card, "100.00", 3)
@@ -39,7 +39,7 @@ func TestAssetPurchaseEffects(t *testing.T) {
 		e := f.create(f.tx("asset_purchase", "200", "THB", f.pay, &f.gold))
 		update := func(next transaction.Transaction) {
 			t.Helper()
-			if _, err := f.st.UpdateWith(ctx, e.ID, WriteOptions{}, func(transaction.Transaction) (transaction.Transaction, error) { return next, nil }); err != nil {
+			if _, err := f.st.UpdateWith(ctx, f.userUID, e.ID, WriteOptions{}, func(transaction.Transaction) (transaction.Transaction, error) { return next, nil }); err != nil {
 				t.Fatalf("update: %v", err)
 			}
 		}
@@ -65,7 +65,7 @@ func TestAssetPurchaseEffects(t *testing.T) {
 		f := newFixture(t)
 		e := f.tx("asset_purchase", "10", "USD", f.pay, &f.gold)
 		var ve *validate.ValidationError
-		if err := f.st.Create(ctx, &e); !errors.As(err, &ve) {
+		if err := f.st.Create(ctx, f.userUID, &e); !errors.As(err, &ve) {
 			t.Fatalf("want validation error, got %v", err)
 		}
 		f.want(f.pay, "1000.00", 1)

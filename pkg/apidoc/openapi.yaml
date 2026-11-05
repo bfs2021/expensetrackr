@@ -13,9 +13,13 @@ info:
   description: |
     JSON API of **expense-service**, a small expense-logging service (Go + Gin + SQLite).
     **Authentication:** username + password login with a server-side session in the
-    `session` cookie (HttpOnly, SameSite=Lax). Every `/api` route needs a valid session
+    `session` cookie (HttpOnly, SameSite=Lax), or a personal API token
+    (`Authorization: Bearer ext_…`). Every `/api` route needs a valid session or token
     (401 otherwise) except `POST /api/auth/login`, `POST /api/auth/register` (first-run only),
     `POST /api/auth/logout`, `GET /api/healthz` and the API description itself.
+    **Ownership:** transactions, balances and categories are per user. Lists and writes
+    are scoped to the authenticated account; another user's uid is **404**. A transaction
+    may only reference that user's balances and categories.
     State-changing requests must not be cross-site (`Origin` must match the host and
     `Sec-Fetch-Site` must be `same-origin`/`none` when sent; 403 otherwise) and a request body
     must be `application/json` (415). See docs/auth.md.
@@ -2484,7 +2488,7 @@ components:
       summary: Name already used
       value:
         error: a balance with this name already exists
-        fields: { name: is already used by another balance (names are case-insensitive) }
+        fields: { name: is already used by another of your balances (names are case-insensitive) }
     ErrCategoryInUseDelete:
       summary: Category still referenced
       value: { error: 'category is used by transactions (1 transaction(s)); it cannot be deleted; reassign or clear category_uid on those transactions first' }

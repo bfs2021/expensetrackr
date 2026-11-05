@@ -14,8 +14,8 @@ import (
 	sqlite3 "modernc.org/sqlite/lib"
 )
 
-// ErrDuplicateName is returned when another balance already has the same
-// name (compared case-insensitively).
+// ErrDuplicateName is returned when another of the same user's balances
+// already has the same name (compared case-insensitively).
 var ErrDuplicateName = errors.New("a balance with this name already exists")
 
 // ErrBalanceInUse is returned when a balance's currency would change while
@@ -41,9 +41,10 @@ func nullInt(p *int64) any {
 	return *p
 }
 
-// CreateBalance inserts a validated balance, assigns a new UUID v4 as UID,
-// and fills in ID and CreatedAt. Any UID already on b is overwritten.
-func (s *Store) CreateBalance(ctx context.Context, b *balance.Balance) error {
+// CreateBalance inserts a validated balance owned by userUID, assigns a new
+// UUID v4 as UID, and fills in ID and CreatedAt. Any UID already on b is
+// overwritten.
+func (s *Store) CreateBalance(ctx context.Context, userUID string, b *balance.Balance) error {
 	scale, ok := money.MinorUnits(b.Currency)
 	if !ok {
 		return fmt.Errorf("unknown currency %q", b.Currency)
@@ -56,9 +57,9 @@ func (s *Store) CreateBalance(ctx context.Context, b *balance.Balance) error {
 	b.CreatedAt = s.nowRFC3339()
 	b.UpdatedAt, b.Version = nil, 1
 	res, err := s.db.ExecContext(ctx,
-		`INSERT INTO balances (uid, name, type, currency, description, amount_scale, balance_minor, debt_minor, limit_minor, created_at)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		b.UID, b.Name, string(b.Type), b.Currency, b.Description, scale,
+		`INSERT INTO balances (uid, user_uid, name, type, currency, description, amount_scale, balance_minor, debt_minor, limit_minor, created_at)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		b.UID, userUID, b.Name, string(b.Type), b.Currency, b.Description, scale,
 		nullInt(b.BalanceMinor), nullInt(b.DebtMinor), nullInt(b.LimitMinor), b.CreatedAt)
 	if err != nil {
 		if mapped := mapBalanceErr(err); mapped == ErrDuplicateName {
@@ -74,13 +75,14 @@ func (s *Store) CreateBalance(ctx context.Context, b *balance.Balance) error {
 	return nil
 }
 
-// ListBalances returns balances grouped by type (payment accounts, credit
-// cards, other assets, other liabilities), then by name. typ "" means all.
-func (s *Store) ListBalances(ctx context.Context, typ balance.Type) ([]balance.Balance, error) {
-	query := `SELECT ` + balanceCols + ` FROM balances`
-	var args []any
+// ListBalances returns balances owned by userUID, grouped by type (payment
+// accounts, credit cards, other assets, other liabilities), then by name.
+// typ "" means all.
+func (s *Store) ListBalances(ctx context.Context, userUID string, typ balance.Type) ([]balance.Balance, error) {
+	query := `SELECT ` + balanceCols + ` FROM balances WHERE user_uid = ?`
+	args := []any{userUID}
 	if typ != "" {
-		query += ` WHERE type = ?`
+		query += ` AND type = ?`
 		args = append(args, string(typ))
 	}
 	query += ` ORDER BY CASE type WHEN 'payment_account' THEN 1 WHEN 'credit_card' THEN 2
@@ -103,8 +105,8 @@ func (s *Store) ListBalances(ctx context.Context, typ balance.Type) ([]balance.B
 
 // ListPayableBalances returns balances that can be used as a payment account
 // on a transaction (payment_account and credit_card), ordered like ListBalances.
-func (s *Store) ListPayableBalances(ctx context.Context) ([]balance.Balance, error) {
-	all, err := s.ListBalances(ctx, "")
+func (s *Store) ListPayableBalances(ctx context.Context, userUID string) ([]balance.Balance, error) {
+	all, err := s.ListBalances(ctx, userUID, "")
 	if err != nil {
 		return nil, err
 	}
@@ -117,18 +119,20 @@ func (s *Store) ListPayableBalances(ctx context.Context) ([]balance.Balance, err
 	return out, nil
 }
 
-// GetBalance returns one balance by numeric id or ErrNotFound.
-func (s *Store) GetBalance(ctx context.Context, id int64) (balance.Balance, error) {
-	b, err := scanBalance(s.db.QueryRowContext(ctx, `SELECT `+balanceCols+` FROM balances WHERE id = ?`, id))
+// GetBalance returns one balance by numeric id for userUID or ErrNotFound
+// (including when the id belongs to another user).
+func (s *Store) GetBalance(ctx context.Context, userUID string, id int64) (balance.Balance, error) {
+	b, err := scanBalance(s.db.QueryRowContext(ctx, `SELECT `+balanceCols+` FROM balances WHERE id = ? AND user_uid = ?`, id, userUID))
 	if errors.Is(err, sql.ErrNoRows) {
 		return balance.Balance{}, ErrNotFound
 	}
 	return b, err
 }
 
-// GetBalanceByUID returns one balance by its UUID or ErrNotFound.
-func (s *Store) GetBalanceByUID(ctx context.Context, uid string) (balance.Balance, error) {
-	b, err := scanBalance(s.db.QueryRowContext(ctx, `SELECT `+balanceCols+` FROM balances WHERE uid = ?`, uid))
+// GetBalanceByUID returns one balance by its UUID for userUID or ErrNotFound
+// (including when the uid belongs to another user).
+func (s *Store) GetBalanceByUID(ctx context.Context, userUID, uid string) (balance.Balance, error) {
+	b, err := scanBalance(s.db.QueryRowContext(ctx, `SELECT `+balanceCols+` FROM balances WHERE uid = ? AND user_uid = ?`, uid, userUID))
 	if errors.Is(err, sql.ErrNoRows) {
 		return balance.Balance{}, ErrNotFound
 	}
@@ -136,8 +140,8 @@ func (s *Store) GetBalanceByUID(ctx context.Context, uid string) (balance.Balanc
 }
 
 // UpdateBalance is UpdateBalanceWith without a version check.
-func (s *Store) UpdateBalance(ctx context.Context, id int64, fn func(cur balance.Balance) (balance.Balance, error)) (balance.Balance, error) {
-	return s.UpdateBalanceWith(ctx, id, WriteOptions{}, fn)
+func (s *Store) UpdateBalance(ctx context.Context, userUID string, id int64, fn func(cur balance.Balance) (balance.Balance, error)) (balance.Balance, error) {
+	return s.UpdateBalanceWith(ctx, userUID, id, WriteOptions{}, fn)
 }
 
 // UpdateBalanceWith loads balance id, passes it to fn and stores what fn
@@ -152,14 +156,14 @@ func (s *Store) UpdateBalance(ctx context.Context, id int64, fn func(cur balance
 // Returns ErrNotFound, ErrVersionConflict (opts.Version > 0 and stale),
 // ErrDuplicateName, ErrBalanceInUse (currency change while transactions
 // reference the balance), or fn's error.
-func (s *Store) UpdateBalanceWith(ctx context.Context, id int64, opts WriteOptions, fn func(cur balance.Balance) (balance.Balance, error)) (balance.Balance, error) {
+func (s *Store) UpdateBalanceWith(ctx context.Context, userUID string, id int64, opts WriteOptions, fn func(cur balance.Balance) (balance.Balance, error)) (balance.Balance, error) {
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return balance.Balance{}, fmt.Errorf("update balance: %w", err)
 	}
 	defer func() { _ = tx.Rollback() }()
 
-	cur, err := scanBalance(tx.QueryRowContext(ctx, `SELECT `+balanceCols+` FROM balances WHERE id = ?`, id))
+	cur, err := scanBalance(tx.QueryRowContext(ctx, `SELECT `+balanceCols+` FROM balances WHERE id = ? AND user_uid = ?`, id, userUID))
 	if errors.Is(err, sql.ErrNoRows) {
 		return balance.Balance{}, ErrNotFound
 	}
@@ -187,7 +191,7 @@ func (s *Store) UpdateBalanceWith(ctx context.Context, id int64, opts WriteOptio
 	}
 	if next.Currency != cur.Currency {
 		var n int
-		if err := tx.QueryRowContext(ctx, `SELECT count(*) FROM transactions WHERE balance_uid = ? OR to_balance_uid = ?`, cur.UID, cur.UID).Scan(&n); err != nil {
+		if err := tx.QueryRowContext(ctx, `SELECT count(*) FROM transactions WHERE user_uid = ? AND (balance_uid = ? OR to_balance_uid = ?)`, userUID, cur.UID, cur.UID).Scan(&n); err != nil {
 			return balance.Balance{}, fmt.Errorf("update balance: %w", err)
 		}
 		if n > 0 {
@@ -210,7 +214,7 @@ func (s *Store) UpdateBalanceWith(ctx context.Context, id int64, opts WriteOptio
 	if n, err := res.RowsAffected(); err != nil || n != 1 {
 		return balance.Balance{}, ErrVersionConflict
 	}
-	if err := recordBalanceAdjustment(ctx, tx, cur, next, now); err != nil {
+	if err := recordBalanceAdjustment(ctx, tx, userUID, cur, next, now, s.now()); err != nil {
 		return balance.Balance{}, err
 	}
 	if err := tx.Commit(); err != nil {
@@ -220,16 +224,17 @@ func (s *Store) UpdateBalanceWith(ctx context.Context, id int64, opts WriteOptio
 }
 
 // DeleteBalance is DeleteBalanceWith without a version check.
-func (s *Store) DeleteBalance(ctx context.Context, id int64) error {
-	return s.DeleteBalanceWith(ctx, id, WriteOptions{})
+func (s *Store) DeleteBalance(ctx context.Context, userUID string, id int64) error {
+	return s.DeleteBalanceWith(ctx, userUID, id, WriteOptions{})
 }
 
-// DeleteBalanceWith removes one balance. Returns ErrNotFound, or
-// ErrVersionConflict when opts.Version > 0 and differs from the stored one.
-// Transactions that reference it keep its uid and name snapshot; editing or
-// deleting them later skips the missing balance.
-func (s *Store) DeleteBalanceWith(ctx context.Context, id int64, opts WriteOptions) error {
-	q, args := `DELETE FROM balances WHERE id = ?`, []any{id}
+// DeleteBalanceWith removes one balance owned by userUID. Returns ErrNotFound
+// (including when the id belongs to another user), or ErrVersionConflict when
+// opts.Version > 0 and differs from the stored one. Transactions that
+// reference it keep its uid and name snapshot; editing or deleting them later
+// skips the missing balance.
+func (s *Store) DeleteBalanceWith(ctx context.Context, userUID string, id int64, opts WriteOptions) error {
+	q, args := `DELETE FROM balances WHERE id = ? AND user_uid = ?`, []any{id, userUID}
 	if opts.Version > 0 {
 		q, args = q+` AND version = ?`, append(args, opts.Version)
 	}
@@ -243,7 +248,7 @@ func (s *Store) DeleteBalanceWith(ctx context.Context, id int64, opts WriteOptio
 	}
 	if n == 0 {
 		if opts.Version > 0 {
-			if _, err := s.GetBalance(ctx, id); err == nil {
+			if _, err := s.GetBalance(ctx, userUID, id); err == nil {
 				return ErrVersionConflict
 			}
 		}

@@ -136,8 +136,8 @@ func TestUserCategoriesInUse(t *testing.T) {
 	if err := st.CreateCategory(ctx, u[0], &food); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := st.db.Exec(`INSERT INTO transactions (uid, type, amount_minor, amount_scale, currency, balance_uid, account, category_uid, spent_at, spent_at_unix, created_at)
-		VALUES ('cccccccc-cccc-4ccc-8ccc-cccccccccccc', 'expense', 100, 2, 'THB', 'dddddddd-dddd-4ddd-8ddd-dddddddddddd', 'Cash', ?, '2026-01-05T00:00:00Z', 1, '2026-01-05T00:00:00Z')`, food.UID); err != nil {
+	if _, err := st.db.Exec(`INSERT INTO transactions (uid, user_uid, type, amount_minor, amount_scale, currency, balance_uid, account, category_uid, spent_at, spent_at_unix, created_at)
+		VALUES ('cccccccc-cccc-4ccc-8ccc-cccccccccccc', ?, 'expense', 100, 2, 'THB', 'dddddddd-dddd-4ddd-8ddd-dddddddddddd', 'Cash', ?, '2026-01-05T00:00:00Z', 1, '2026-01-05T00:00:00Z')`, u[0], food.UID); err != nil {
 		t.Fatal(err)
 	}
 	if err := st.DeleteCategory(ctx, u[0], string(food.UID)); !errors.Is(err, ErrCategoryInUse) {

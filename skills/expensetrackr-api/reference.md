@@ -17,8 +17,8 @@ Contents: [Server](#server) · [Auth](#auth) · [Conventions](#conventions) ·
 - Default base URL `http://127.0.0.1:8080` (server flag `-addr` /
   `EXPENSE_ADDR`). Point agents elsewhere with `EXPENSETRACKR_URL`.
 - `GET /api/healthz` → `{"status":"ok"}` (no login) to check it is up.
-- Data (transactions, balances) is **shared by all accounts** on the server;
-  categories are per user.
+- Data (transactions, balances, categories) is **per user**: each account
+  only sees and edits its own rows.
 
 ## Auth
 

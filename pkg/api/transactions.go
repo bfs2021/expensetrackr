@@ -55,7 +55,7 @@ func (s *Server) registerTransactionRoutes(api *gin.RouterGroup) {
 // For a transfer it then fills the cross-currency fields (convertTransfer),
 // which may fetch an exchange rate; prev is the stored transaction on PUT.
 func (s *Server) attachPaymentBalance(c *gin.Context, e *transaction.Transaction, in transaction.CreateInput, prev *transaction.Transaction) error {
-	b, err := s.Store.GetBalanceByUID(c.Request.Context(), string(e.BalanceUID))
+	b, err := s.Store.GetBalanceByUID(c.Request.Context(), sessionUserUID(c), string(e.BalanceUID))
 	if errors.Is(err, store.ErrNotFound) {
 		return &validate.ValidationError{Fields: map[string]string{
 			"balance_uid": "does not match any balance",
@@ -74,7 +74,7 @@ func (s *Server) attachPaymentBalance(c *gin.Context, e *transaction.Transaction
 		e.ToBalanceUID, e.ToAccount = nil, nil
 		return s.convertTransfer(c, e, in, b, balance.Balance{}, prev)
 	}
-	to, err := s.Store.GetBalanceByUID(c.Request.Context(), string(*e.ToBalanceUID))
+	to, err := s.Store.GetBalanceByUID(c.Request.Context(), sessionUserUID(c), string(*e.ToBalanceUID))
 	if errors.Is(err, store.ErrNotFound) {
 		return &validate.ValidationError{Fields: map[string]string{
 			"to_balance_uid": "does not match any balance",
@@ -105,7 +105,7 @@ func (s *Server) createTransaction(c *gin.Context) {
 	}
 	// Create also moves the balances (same DB transaction); a missing balance
 	// or a currency mismatch comes back as a validation error (422).
-	if err := s.Store.Create(c.Request.Context(), &e); err != nil {
+	if err := s.Store.Create(c.Request.Context(), sessionUserUID(c), &e); err != nil {
 		writeInputError(c, err)
 		return
 	}
@@ -117,7 +117,7 @@ func (s *Server) createTransaction(c *gin.Context) {
 // transactionConflict answers 409 with the transaction as it is now (or 404
 // if it was deleted meanwhile).
 func (s *Server) transactionConflict(c *gin.Context, id int64) {
-	cur, err := s.Store.Get(c.Request.Context(), id)
+	cur, err := s.Store.Get(c.Request.Context(), sessionUserUID(c), id)
 	if err != nil {
 		writeInputError(c, err)
 		return
@@ -129,7 +129,7 @@ func (s *Server) transactionConflict(c *gin.Context, id int64) {
 // response: 200 + ETag, 409 on a stale version, 422 (e.g. currency mismatch
 // with a balance) or 404.
 func (s *Server) saveTransaction(c *gin.Context, cur transaction.Transaction, version int64, next transaction.Transaction) {
-	updated, err := s.Store.UpdateWith(c.Request.Context(), cur.ID, store.WriteOptions{Version: version}, func(transaction.Transaction) (transaction.Transaction, error) {
+	updated, err := s.Store.UpdateWith(c.Request.Context(), sessionUserUID(c), cur.ID, store.WriteOptions{Version: version}, func(transaction.Transaction) (transaction.Transaction, error) {
 		return next, nil
 	})
 	if errors.Is(err, store.ErrVersionConflict) {
@@ -239,7 +239,7 @@ func (s *Server) listTransactions(c *gin.Context) {
 		return
 	}
 
-	items, err := s.Store.List(c.Request.Context(), f)
+	items, err := s.Store.List(c.Request.Context(), sessionUserUID(c), f)
 	if err != nil {
 		internalError(c, err)
 		return
@@ -271,7 +271,7 @@ func (s *Server) deleteTransaction(c *gin.Context) {
 	if !ok {
 		return
 	}
-	err := s.Store.DeleteWith(c.Request.Context(), cur.ID, store.WriteOptions{Version: version})
+	err := s.Store.DeleteWith(c.Request.Context(), sessionUserUID(c), cur.ID, store.WriteOptions{Version: version})
 	if errors.Is(err, store.ErrVersionConflict) {
 		s.transactionConflict(c, cur.ID)
 		return
@@ -290,7 +290,7 @@ func (s *Server) resolveTransaction(c *gin.Context) (transaction.Transaction, bo
 	if !ok {
 		return transaction.Transaction{}, false
 	}
-	e, err := s.Store.GetByUID(c.Request.Context(), uid)
+	e, err := s.Store.GetByUID(c.Request.Context(), sessionUserUID(c), uid)
 	if errors.Is(err, store.ErrNotFound) {
 		c.JSON(http.StatusNotFound, errorBody{Error: "transaction not found"})
 		return transaction.Transaction{}, false

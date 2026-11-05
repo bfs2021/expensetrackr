@@ -9,6 +9,7 @@ import (
 
 	"github.com/nutmos/expensetrackr/pkg/balance"
 	"github.com/nutmos/expensetrackr/pkg/transaction"
+	"github.com/nutmos/expensetrackr/pkg/user"
 	"github.com/nutmos/expensetrackr/pkg/validate"
 )
 
@@ -18,9 +19,23 @@ import (
 //	card  credit_card      debt 100.00, limit 1000.00
 //	gold  other_asset      balance 500.00
 //	loan  other_liability  debt 5000.00, limit 10000.00
+
+// seedOwner registers a user and returns its uid. Store tests that create
+// balances or transactions need an owner after migration v3.
+func seedOwner(t *testing.T, st *Store) string {
+	t.Helper()
+	name := "owner"
+	u := user.User{Username: &name, DisplayName: "Owner"}
+	if err := st.RegisterUser(context.Background(), &u, "$2a$04$unused", false); err != nil {
+		t.Fatal(err)
+	}
+	return u.UID
+}
+
 type fixture struct {
 	t                     *testing.T
 	st                    *Store
+	userUID               string
 	pay, card, gold, loan balance.Balance
 }
 
@@ -31,10 +46,10 @@ func newFixture(t *testing.T) *fixture {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { st.Close() })
-	f := &fixture{t: t, st: st}
+	f := &fixture{t: t, st: st, userUID: seedOwner(t, st)}
 	mk := func(in balance.Input) balance.Balance {
 		b := mustBalance(t, in)
-		if err := st.CreateBalance(context.Background(), &b); err != nil {
+		if err := st.CreateBalance(context.Background(), f.userUID, &b); err != nil {
 			t.Fatal(err)
 		}
 		return b
@@ -49,7 +64,7 @@ func newFixture(t *testing.T) *fixture {
 // amount returns "balance" for assets and "debt" for liabilities, plus version.
 func (f *fixture) amount(b balance.Balance) (string, int64) {
 	f.t.Helper()
-	got, err := f.st.GetBalanceByUID(context.Background(), string(b.UID))
+	got, err := f.st.GetBalanceByUID(context.Background(), f.userUID, string(b.UID))
 	if err != nil {
 		f.t.Fatal(err)
 	}
@@ -85,7 +100,7 @@ func (f *fixture) tx(typ, amount, currency string, from balance.Balance, to *bal
 
 func (f *fixture) create(e transaction.Transaction) transaction.Transaction {
 	f.t.Helper()
-	if err := f.st.Create(context.Background(), &e); err != nil {
+	if err := f.st.Create(context.Background(), f.userUID, &e); err != nil {
 		f.t.Fatalf("create: %v", err)
 	}
 	return e
@@ -140,7 +155,7 @@ func TestBalanceSignRules(t *testing.T) {
 				}
 			}
 			// Deleting reverses the effect exactly (version moves on).
-			if err := f.st.DeleteWith(context.Background(), e.ID, WriteOptions{}); err != nil {
+			if err := f.st.DeleteWith(context.Background(), f.userUID, e.ID, WriteOptions{}); err != nil {
 				t.Fatal(err)
 			}
 			for name, amt := range initial {
@@ -157,12 +172,12 @@ func TestBalanceSignRules(t *testing.T) {
 func TestOverLimitStillComputed(t *testing.T) {
 	f := newFixture(t)
 	f.create(f.tx("expense", "950", "THB", f.card, nil))
-	got, _ := f.st.GetBalanceByUID(context.Background(), string(f.card.UID))
+	got, _ := f.st.GetBalanceByUID(context.Background(), f.userUID, string(f.card.UID))
 	if *got.Debt != "1050.00" || !*got.OverLimit || *got.Available != "-50.00" {
 		t.Errorf("over limit: debt %s over %v avail %s", *got.Debt, *got.OverLimit, *got.Available)
 	}
 	f.create(f.tx("transfer", "1100", "THB", f.pay, &f.card))
-	got, _ = f.st.GetBalanceByUID(context.Background(), string(f.card.UID))
+	got, _ = f.st.GetBalanceByUID(context.Background(), f.userUID, string(f.card.UID))
 	if *got.Debt != "-50.00" || *got.OverLimit || *got.Available != "1050.00" {
 		t.Errorf("in credit: debt %s over %v avail %s", *got.Debt, *got.OverLimit, *got.Available)
 	}
@@ -176,7 +191,7 @@ func TestUpdateReversesOldEffectAndAppliesNew(t *testing.T) {
 
 	update := func(next transaction.Transaction) transaction.Transaction {
 		t.Helper()
-		got, err := f.st.UpdateWith(ctx, e.ID, WriteOptions{}, func(transaction.Transaction) (transaction.Transaction, error) { return next, nil })
+		got, err := f.st.UpdateWith(ctx, f.userUID, e.ID, WriteOptions{}, func(transaction.Transaction) (transaction.Transaction, error) { return next, nil })
 		if err != nil {
 			t.Fatalf("update: %v", err)
 		}
@@ -214,7 +229,7 @@ func TestUpdateReversesOldEffectAndAppliesNew(t *testing.T) {
 		t.Errorf("transaction version = %d, want 7", e.Version)
 	}
 	// Delete: everything back to the start.
-	if err := f.st.DeleteWith(ctx, e.ID, WriteOptions{}); err != nil {
+	if err := f.st.DeleteWith(ctx, f.userUID, e.ID, WriteOptions{}); err != nil {
 		t.Fatal(err)
 	}
 	f.want(f.pay, "1000.00", 7)
@@ -236,17 +251,17 @@ func TestCurrencyMismatchRejected(t *testing.T) {
 	f := newFixture(t)
 	ctx := context.Background()
 	usd := mustBalance(t, balance.Input{Name: "usd", Type: "payment_account", Currency: "USD", Balance: dec("10")})
-	if err := f.st.CreateBalance(ctx, &usd); err != nil {
+	if err := f.st.CreateBalance(ctx, f.userUID, &usd); err != nil {
 		t.Fatal(err)
 	}
 
 	// Create: USD expense on a THB account -> 422-style error, nothing written.
 	e := f.tx("expense", "5", "USD", f.pay, nil)
-	fieldErr(t, f.st.Create(ctx, &e), "balance_uid")
+	fieldErr(t, f.st.Create(ctx, f.userUID, &e), "balance_uid")
 	// Transfer THB -> USD destination.
 	e = f.tx("transfer", "5", "THB", f.pay, &usd)
-	fieldErr(t, f.st.Create(ctx, &e), "to_balance_uid")
-	if items, _ := f.st.List(ctx, ListFilter{}); len(items) != 0 {
+	fieldErr(t, f.st.Create(ctx, f.userUID, &e), "to_balance_uid")
+	if items, _ := f.st.List(ctx, f.userUID, ListFilter{}); len(items) != 0 {
 		t.Errorf("rejected creates left %d rows", len(items))
 	}
 	f.want(f.pay, "1000.00", 1)
@@ -254,17 +269,17 @@ func TestCurrencyMismatchRejected(t *testing.T) {
 
 	// Update to a mismatching currency is rejected; row and balance unchanged.
 	ok := f.create(f.tx("expense", "5", "THB", f.pay, nil))
-	_, err := f.st.UpdateWith(ctx, ok.ID, WriteOptions{}, func(transaction.Transaction) (transaction.Transaction, error) {
+	_, err := f.st.UpdateWith(ctx, f.userUID, ok.ID, WriteOptions{}, func(transaction.Transaction) (transaction.Transaction, error) {
 		return f.tx("expense", "5", "USD", f.pay, nil), nil
 	})
 	fieldErr(t, err, "balance_uid")
-	if got, _ := f.st.Get(ctx, ok.ID); got.Currency != "THB" || got.Version != 1 {
+	if got, _ := f.st.Get(ctx, f.userUID, ok.ID); got.Currency != "THB" || got.Version != 1 {
 		t.Errorf("after rejected update: %+v", got)
 	}
 	f.want(f.pay, "995.00", 2)
 
 	// A balance's currency cannot change while transactions reference it.
-	_, err = f.st.UpdateBalance(ctx, f.pay.ID, func(cur balance.Balance) (balance.Balance, error) {
+	_, err = f.st.UpdateBalance(ctx, f.userUID, f.pay.ID, func(cur balance.Balance) (balance.Balance, error) {
 		in := cur.Input()
 		in.Currency = "USD"
 		return in.Validate()
@@ -273,7 +288,7 @@ func TestCurrencyMismatchRejected(t *testing.T) {
 		t.Errorf("currency change in use: %v", err)
 	}
 	// ...but can when unreferenced.
-	if _, err := f.st.UpdateBalance(ctx, f.gold.ID, func(cur balance.Balance) (balance.Balance, error) {
+	if _, err := f.st.UpdateBalance(ctx, f.userUID, f.gold.ID, func(cur balance.Balance) (balance.Balance, error) {
 		in := cur.Input()
 		in.Currency = "USD"
 		return in.Validate()
@@ -286,17 +301,17 @@ func TestMissingBalance(t *testing.T) {
 	f := newFixture(t)
 	ctx := context.Background()
 	e := f.create(f.tx("transfer", "10", "THB", f.pay, &f.gold))
-	if err := f.st.DeleteBalance(ctx, f.gold.ID); err != nil {
+	if err := f.st.DeleteBalance(ctx, f.userUID, f.gold.ID); err != nil {
 		t.Fatal(err)
 	}
 	// Deleting the transaction reverses what it can (pay) and skips gold.
-	if err := f.st.DeleteWith(ctx, e.ID, WriteOptions{}); err != nil {
+	if err := f.st.DeleteWith(ctx, f.userUID, e.ID, WriteOptions{}); err != nil {
 		t.Fatalf("delete with missing balance: %v", err)
 	}
 	f.want(f.pay, "1000.00", 3)
 	// A new transaction on a missing balance is rejected.
 	n := f.tx("expense", "1", "THB", f.gold, nil)
-	fieldErr(t, f.st.Create(ctx, &n), "balance_uid")
+	fieldErr(t, f.st.Create(ctx, f.userUID, &n), "balance_uid")
 }
 
 func TestVersionChecks(t *testing.T) {
@@ -305,36 +320,36 @@ func TestVersionChecks(t *testing.T) {
 	e := f.create(f.tx("expense", "10", "THB", f.pay, nil))
 	same := func(cur transaction.Transaction) (transaction.Transaction, error) { return cur, nil }
 
-	if _, err := f.st.UpdateWith(ctx, e.ID, WriteOptions{Version: 2}, same); !errors.Is(err, ErrVersionConflict) {
+	if _, err := f.st.UpdateWith(ctx, f.userUID, e.ID, WriteOptions{Version: 2}, same); !errors.Is(err, ErrVersionConflict) {
 		t.Errorf("stale tx update: %v", err)
 	}
-	if _, err := f.st.UpdateWith(ctx, e.ID, WriteOptions{Version: 1}, same); err != nil {
+	if _, err := f.st.UpdateWith(ctx, f.userUID, e.ID, WriteOptions{Version: 1}, same); err != nil {
 		t.Errorf("fresh tx update: %v", err)
 	}
-	if _, err := f.st.UpdateWith(ctx, e.ID, WriteOptions{Version: 1}, same); !errors.Is(err, ErrVersionConflict) {
+	if _, err := f.st.UpdateWith(ctx, f.userUID, e.ID, WriteOptions{Version: 1}, same); !errors.Is(err, ErrVersionConflict) {
 		t.Errorf("replayed tx update: %v", err)
 	}
-	if err := f.st.DeleteWith(ctx, e.ID, WriteOptions{Version: 1}); !errors.Is(err, ErrVersionConflict) {
+	if err := f.st.DeleteWith(ctx, f.userUID, e.ID, WriteOptions{Version: 1}); !errors.Is(err, ErrVersionConflict) {
 		t.Errorf("stale tx delete: %v", err)
 	}
 	f.want(f.pay, "990.00", 2) // failed writes left the balance alone
 
 	// Balances: version 2 now (moved by the transaction); 1 is stale.
 	keep := func(cur balance.Balance) (balance.Balance, error) { return cur.Input().Validate() }
-	if _, err := f.st.UpdateBalanceWith(ctx, f.pay.ID, WriteOptions{Version: 1}, keep); !errors.Is(err, ErrVersionConflict) {
+	if _, err := f.st.UpdateBalanceWith(ctx, f.userUID, f.pay.ID, WriteOptions{Version: 1}, keep); !errors.Is(err, ErrVersionConflict) {
 		t.Errorf("stale balance update: %v", err)
 	}
-	if err := f.st.DeleteBalanceWith(ctx, f.pay.ID, WriteOptions{Version: 1}); !errors.Is(err, ErrVersionConflict) {
+	if err := f.st.DeleteBalanceWith(ctx, f.userUID, f.pay.ID, WriteOptions{Version: 1}); !errors.Is(err, ErrVersionConflict) {
 		t.Errorf("stale balance delete: %v", err)
 	}
-	b, err := f.st.UpdateBalanceWith(ctx, f.pay.ID, WriteOptions{Version: 2}, keep)
+	b, err := f.st.UpdateBalanceWith(ctx, f.userUID, f.pay.ID, WriteOptions{Version: 2}, keep)
 	if err != nil || b.Version != 3 {
 		t.Errorf("fresh balance update: v%d %v", b.Version, err)
 	}
-	if err := f.st.DeleteBalanceWith(ctx, f.pay.ID, WriteOptions{Version: 3}); err != nil {
+	if err := f.st.DeleteBalanceWith(ctx, f.userUID, f.pay.ID, WriteOptions{Version: 3}); err != nil {
 		t.Errorf("fresh balance delete: %v", err)
 	}
-	if err := f.st.DeleteBalanceWith(ctx, f.pay.ID, WriteOptions{Version: 3}); !errors.Is(err, ErrNotFound) {
+	if err := f.st.DeleteBalanceWith(ctx, f.userUID, f.pay.ID, WriteOptions{Version: 3}); !errors.Is(err, ErrNotFound) {
 		t.Errorf("delete again: %v", err)
 	}
 }
@@ -345,7 +360,7 @@ func TestManualOverride(t *testing.T) {
 	f := newFixture(t)
 	ctx := context.Background()
 	f.create(f.tx("expense", "30", "THB", f.card, nil)) // debt 130, v2
-	got, err := f.st.UpdateBalanceWith(ctx, f.card.ID, WriteOptions{Version: 2}, func(cur balance.Balance) (balance.Balance, error) {
+	got, err := f.st.UpdateBalanceWith(ctx, f.userUID, f.card.ID, WriteOptions{Version: 2}, func(cur balance.Balance) (balance.Balance, error) {
 		in := cur.Input()
 		in.Debt = dec("125")
 		return in.ValidateUpdate(cur.Type)
@@ -373,7 +388,7 @@ func TestConcurrentWritesStayConsistent(t *testing.T) {
 				typ, to = "transfer", &f.card
 			}
 			e := f.tx(typ, "1", "THB", from, to)
-			errs <- f.st.Create(ctx, &e)
+			errs <- f.st.Create(ctx, f.userUID, &e)
 		}(i)
 	}
 	wg.Wait()
@@ -387,14 +402,14 @@ func TestConcurrentWritesStayConsistent(t *testing.T) {
 	f.want(f.card, "80.00", 1+n/2)
 
 	// Many clients PUT the same balance from the same version: exactly one wins.
-	b, _ := f.st.GetBalanceByUID(ctx, string(f.gold.UID))
+	b, _ := f.st.GetBalanceByUID(ctx, f.userUID, string(f.gold.UID))
 	var mu sync.Mutex
 	wins, conflicts := 0, 0
 	for i := 0; i < n; i++ {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			_, err := f.st.UpdateBalanceWith(ctx, b.ID, WriteOptions{Version: b.Version}, func(cur balance.Balance) (balance.Balance, error) {
+			_, err := f.st.UpdateBalanceWith(ctx, f.userUID, b.ID, WriteOptions{Version: b.Version}, func(cur balance.Balance) (balance.Balance, error) {
 				in := cur.Input()
 				in.Balance = dec("1")
 				return in.Validate()

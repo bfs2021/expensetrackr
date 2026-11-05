@@ -184,12 +184,25 @@ protected route → 401, password change invalidates other sessions, CSRF).
 Other API tests run as a seeded logged-in user (`loggedIn` helper adds the
 cookie); there is no auth bypass in production code.
 
+## Data ownership
+
+Transactions, balances and categories belong to the logged-in user (cookie
+session or Bearer API token). Every list/get/create/update/delete is scoped
+to that account; another user's uid is a **404** (existence does not leak).
+A transaction may only reference the owner's balances and categories.
+
+Migration v3 assigns any pre-existing balances and transactions to the
+earliest-created user (`ORDER BY created_at ASC, id ASC`). If the database
+has such rows but no users, those orphans are deleted so the migration can
+apply `NOT NULL user_uid` without failing. Balance names are unique per user.
+
+`/api/users` ownership (who may edit or list other accounts) is a separate
+follow-up; this release does not change that behaviour.
+
 ## Follow-ups
 
-- **Per-user data ownership**: transactions, balances and categories are still
-  shared by every account. Needs `user_uid` columns, a migration assigning
-  existing rows to the first user, and scoping in every query.
 - **SSO** (Sign in with Apple / Google) using `user_identities`.
-- Roles / admin (who may create users or edit others' profiles), disabling users via API.
+- Roles / admin (who may create users or edit others' profiles), disabling users via API;
+  scoping `/api/users` so accounts cannot edit one another.
 - Password reset (needs email or an admin), "log out everywhere", session list.
 - Persistent / global rate limiting (the throttle is per process and in memory).

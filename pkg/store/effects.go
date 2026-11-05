@@ -28,7 +28,7 @@ import (
 // edit of the note only) is not written at all. A reversed balance that no
 // longer exists (deleted) is skipped. See transaction.Effects for the sign
 // rules.
-func applyBalanceEffects(ctx context.Context, tx *sql.Tx, old, next *transaction.Transaction, now string) error {
+func applyBalanceEffects(ctx context.Context, tx *sql.Tx, userUID string, old, next *transaction.Transaction, now string) error {
 	deltas := map[string]int64{}
 	var order []string
 	reversedCurrency := map[string]string{}
@@ -48,7 +48,7 @@ func applyBalanceEffects(ctx context.Context, tx *sql.Tx, old, next *transaction
 	if next != nil && next.AdjustsBalances {
 		for _, ef := range next.Effects() {
 			uid := string(ef.BalanceUID)
-			b, err := balanceByUIDTx(ctx, tx, uid)
+			b, err := balanceByUIDTx(ctx, tx, userUID, uid)
 			if errors.Is(err, ErrNotFound) {
 				return &validate.ValidationError{Fields: map[string]string{ef.Field: "does not match any balance"}}
 			}
@@ -70,7 +70,7 @@ func applyBalanceEffects(ctx context.Context, tx *sql.Tx, old, next *transaction
 		if d == 0 {
 			continue
 		}
-		b, err := balanceByUIDTx(ctx, tx, uid)
+		b, err := balanceByUIDTx(ctx, tx, userUID, uid)
 		if errors.Is(err, ErrNotFound) {
 			continue // balance deleted since: nothing left to adjust
 		}
@@ -104,8 +104,8 @@ func effectCurrency(e transaction.Transaction, ef transaction.Effect) string {
 	return e.Currency
 }
 
-func balanceByUIDTx(ctx context.Context, tx *sql.Tx, uid string) (balance.Balance, error) {
-	b, err := scanBalance(tx.QueryRowContext(ctx, `SELECT `+balanceCols+` FROM balances WHERE uid = ?`, uid))
+func balanceByUIDTx(ctx context.Context, tx *sql.Tx, userUID, uid string) (balance.Balance, error) {
+	b, err := scanBalance(tx.QueryRowContext(ctx, `SELECT `+balanceCols+` FROM balances WHERE uid = ? AND user_uid = ?`, uid, userUID))
 	if errors.Is(err, sql.ErrNoRows) {
 		return balance.Balance{}, ErrNotFound
 	}

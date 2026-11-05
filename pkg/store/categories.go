@@ -238,9 +238,9 @@ func (s *Store) GetCategoryByUID(ctx context.Context, userUID, uid string) (cate
 	return category.Category{}, ErrNotFound
 }
 
-func countCategoryRefs(ctx context.Context, tx *sql.Tx, uid common_type.UID) (int, error) {
+func countCategoryRefs(ctx context.Context, tx *sql.Tx, userUID string, uid common_type.UID) (int, error) {
 	var n int
-	err := tx.QueryRowContext(ctx, `SELECT count(*) FROM transactions WHERE category_uid = ?`, string(uid)).Scan(&n)
+	err := tx.QueryRowContext(ctx, `SELECT count(*) FROM transactions WHERE user_uid = ? AND category_uid = ?`, userUID, string(uid)).Scan(&n)
 	return n, err
 }
 
@@ -261,7 +261,7 @@ func (s *Store) UpdateCategory(ctx context.Context, userUID, uid string, fn func
 			return nil, err
 		}
 		if next.Type != cur.Type {
-			n, err := countCategoryRefs(ctx, tx, cur.UID)
+			n, err := countCategoryRefs(ctx, tx, userUID, cur.UID)
 			if err != nil {
 				return nil, err
 			}
@@ -294,7 +294,7 @@ func (s *Store) DeleteCategory(ctx context.Context, userUID, uid string) error {
 		if i < 0 {
 			return nil, ErrNotFound
 		}
-		n, err := countCategoryRefs(ctx, tx, cats[i].UID)
+		n, err := countCategoryRefs(ctx, tx, userUID, cats[i].UID)
 		if err != nil {
 			return nil, err
 		}

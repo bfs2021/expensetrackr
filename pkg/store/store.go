@@ -87,12 +87,12 @@ func Open(path string) (*Store, error) {
 // Close closes the database.
 func (s *Store) Close() error { return s.db.Close() }
 
-// Create inserts a validated transaction as a new row in transactions, fills
-// in UID, ID, CreatedAt and Version (1), and moves the referenced balances
-// (see applyBalanceEffects), all in one database transaction. A referenced
-// balance that is missing or in another currency is a *validate.ValidationError
-// and nothing is written.
-func (s *Store) Create(ctx context.Context, e *transaction.Transaction) error {
+// Create inserts a validated transaction as a new row in transactions owned by
+// userUID, fills in UID, ID, CreatedAt and Version (1), and moves the
+// referenced balances (see applyBalanceEffects), all in one database
+// transaction. A referenced balance that is missing, owned by another user, or
+// in another currency is a *validate.ValidationError and nothing is written.
+func (s *Store) Create(ctx context.Context, userUID string, e *transaction.Transaction) error {
 	if e.Type == transaction.BalanceAdjustment {
 		return ErrReadOnly
 	}
@@ -104,7 +104,7 @@ func (s *Store) Create(ctx context.Context, e *transaction.Transaction) error {
 		return fmt.Errorf("insert transaction: %w", err)
 	}
 	defer func() { _ = tx.Rollback() }() // no-op after Commit
-	next, err := insertTx(ctx, tx, *e, s.nowRFC3339())
+	next, err := insertTx(ctx, tx, userUID, *e, s.nowRFC3339())
 	if err != nil {
 		return err
 	}
@@ -118,7 +118,7 @@ func (s *Store) Create(ctx context.Context, e *transaction.Transaction) error {
 // insertTx inserts e (already validated, not a balance adjustment) inside tx
 // and applies its balance effects. A duplicate (balance_uid, import_ref) is a
 // *DuplicateImportRefError.
-func insertTx(ctx context.Context, tx *sql.Tx, e transaction.Transaction, now string) (transaction.Transaction, error) {
+func insertTx(ctx context.Context, tx *sql.Tx, userUID string, e transaction.Transaction, now string) (transaction.Transaction, error) {
 	scale, ok := money.MinorUnits(e.Currency)
 	if !ok {
 		return e, fmt.Errorf("unknown currency %q", e.Currency)
@@ -130,10 +130,10 @@ func insertTx(ctx context.Context, tx *sql.Tx, e transaction.Transaction, now st
 	next := e
 	next.UID, next.CreatedAt, next.UpdatedAt, next.Version, next.AdjustsBalances = uid, now, nil, 1, true
 	res, err := tx.ExecContext(ctx,
-		`INSERT INTO transactions (uid, type, amount_minor, amount_scale, currency, balance_uid, account, to_balance_uid, to_account, category_uid, spent_at, spent_at_unix, note, created_at, version, balance_applied,
+		`INSERT INTO transactions (uid, user_uid, type, amount_minor, amount_scale, currency, balance_uid, account, to_balance_uid, to_account, category_uid, spent_at, spent_at_unix, note, created_at, version, balance_applied,
 		                           to_amount_minor, to_amount_scale, to_currency, exchange_rate, rate_source, rate_date, import_ref)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, 1, ?, ?, ?, ?, ?, ?, ?)`,
-		append(append([]any{next.UID, string(next.Type), next.AmountMinor, scale, next.Currency, next.BalanceUID, next.Account, next.ToBalanceUID, next.ToAccount, next.CategoryUID, next.SpentAt, next.SpentTime.Unix(), next.Note, next.CreatedAt},
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, 1, ?, ?, ?, ?, ?, ?, ?)`,
+		append(append([]any{next.UID, userUID, string(next.Type), next.AmountMinor, scale, next.Currency, next.BalanceUID, next.Account, next.ToBalanceUID, next.ToAccount, next.CategoryUID, next.SpentAt, next.SpentTime.Unix(), next.Note, next.CreatedAt},
 			fxArgs(next)...), next.ImportRef)...)
 	if err != nil {
 		return e, mapImportRefErr(ctx, tx, next, fmt.Errorf("insert transaction: %w", err))
@@ -143,7 +143,7 @@ func insertTx(ctx context.Context, tx *sql.Tx, e transaction.Transaction, now st
 		return e, fmt.Errorf("insert transaction: %w", err)
 	}
 	next.ID = id
-	if err := applyBalanceEffects(ctx, tx, nil, &next, now); err != nil {
+	if err := applyBalanceEffects(ctx, tx, userUID, nil, &next, now); err != nil {
 		return e, err
 	}
 	return next, nil
@@ -161,10 +161,11 @@ type ListFilter struct {
 const selectCols = `id, uid, type, amount_minor, amount_scale, currency, balance_uid, account, to_balance_uid, to_account, category_uid, spent_at, note, created_at, updated_at, version, balance_applied, adjustment_direction,
 	to_amount_minor, to_amount_scale, to_currency, exchange_rate, rate_source, rate_date, import_ref`
 
-// List returns rows from transactions newest first (by spend time, then ID).
-func (s *Store) List(ctx context.Context, f ListFilter) ([]transaction.Transaction, error) {
-	query := `SELECT ` + selectCols + ` FROM transactions WHERE 1=1`
-	var args []any
+// List returns rows from transactions owned by userUID, newest first (by spend
+// time, then ID).
+func (s *Store) List(ctx context.Context, userUID string, f ListFilter) ([]transaction.Transaction, error) {
+	query := `SELECT ` + selectCols + ` FROM transactions WHERE user_uid = ?`
+	args := []any{userUID}
 	if f.From != nil {
 		query += ` AND spent_at_unix >= ?`
 		args = append(args, f.From.Unix())
@@ -203,9 +204,10 @@ func (s *Store) List(ctx context.Context, f ListFilter) ([]transaction.Transacti
 	return out, rows.Err()
 }
 
-// Get returns one row from transactions or ErrNotFound.
-func (s *Store) Get(ctx context.Context, id int64) (transaction.Transaction, error) {
-	row := s.db.QueryRowContext(ctx, `SELECT `+selectCols+` FROM transactions WHERE id = ?`, id)
+// Get returns one row from transactions owned by userUID or ErrNotFound
+// (including when the id belongs to another user).
+func (s *Store) Get(ctx context.Context, userUID string, id int64) (transaction.Transaction, error) {
+	row := s.db.QueryRowContext(ctx, `SELECT `+selectCols+` FROM transactions WHERE id = ? AND user_uid = ?`, id, userUID)
 	e, err := scan(row)
 	if errors.Is(err, sql.ErrNoRows) {
 		return transaction.Transaction{}, ErrNotFound
@@ -213,9 +215,10 @@ func (s *Store) Get(ctx context.Context, id int64) (transaction.Transaction, err
 	return e, err
 }
 
-// GetByUID returns one row from transactions by its UUID or ErrNotFound.
-func (s *Store) GetByUID(ctx context.Context, uid string) (transaction.Transaction, error) {
-	row := s.db.QueryRowContext(ctx, `SELECT `+selectCols+` FROM transactions WHERE uid = ?`, strings.ToLower(strings.TrimSpace(uid)))
+// GetByUID returns one row from transactions by its UUID for userUID or
+// ErrNotFound (including when the uid belongs to another user).
+func (s *Store) GetByUID(ctx context.Context, userUID, uid string) (transaction.Transaction, error) {
+	row := s.db.QueryRowContext(ctx, `SELECT `+selectCols+` FROM transactions WHERE uid = ? AND user_uid = ?`, strings.ToLower(strings.TrimSpace(uid)), userUID)
 	e, err := scan(row)
 	if errors.Is(err, sql.ErrNoRows) {
 		return transaction.Transaction{}, ErrNotFound
@@ -235,14 +238,14 @@ func (s *Store) GetByUID(ctx context.Context, uid string) (transaction.Transacti
 // the same database transaction (amount, type and account changes all work);
 // a new balance that is missing or in another currency is a
 // *validate.ValidationError. Returns ErrNotFound if the row does not exist.
-func (s *Store) UpdateWith(ctx context.Context, id int64, opts WriteOptions, fn func(cur transaction.Transaction) (transaction.Transaction, error)) (transaction.Transaction, error) {
+func (s *Store) UpdateWith(ctx context.Context, userUID string, id int64, opts WriteOptions, fn func(cur transaction.Transaction) (transaction.Transaction, error)) (transaction.Transaction, error) {
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return transaction.Transaction{}, fmt.Errorf("update transaction: %w", err)
 	}
 	defer func() { _ = tx.Rollback() }() // no-op after Commit
 
-	cur, err := scan(tx.QueryRowContext(ctx, `SELECT `+selectCols+` FROM transactions WHERE id = ?`, id))
+	cur, err := scan(tx.QueryRowContext(ctx, `SELECT `+selectCols+` FROM transactions WHERE id = ? AND user_uid = ?`, id, userUID))
 	if errors.Is(err, sql.ErrNoRows) {
 		return transaction.Transaction{}, ErrNotFound
 	}
@@ -287,7 +290,7 @@ func (s *Store) UpdateWith(ctx context.Context, id int64, opts WriteOptions, fn 
 	if n, err := res.RowsAffected(); err != nil || n != 1 {
 		return transaction.Transaction{}, ErrVersionConflict
 	}
-	if err := applyBalanceEffects(ctx, tx, &cur, &next, now); err != nil {
+	if err := applyBalanceEffects(ctx, tx, userUID, &cur, &next, now); err != nil {
 		return transaction.Transaction{}, err
 	}
 	if err := tx.Commit(); err != nil {
@@ -296,17 +299,18 @@ func (s *Store) UpdateWith(ctx context.Context, id int64, opts WriteOptions, fn 
 	return next, nil
 }
 
-// DeleteWith removes one row from transactions and reverses its balance
-// effect, in one database transaction. Returns ErrNotFound, or
-// ErrVersionConflict when opts.Version > 0 and differs from the stored one.
-func (s *Store) DeleteWith(ctx context.Context, id int64, opts WriteOptions) error {
+// DeleteWith removes one row from transactions owned by userUID and reverses
+// its balance effect, in one database transaction. Returns ErrNotFound
+// (including when the id belongs to another user), or ErrVersionConflict when
+// opts.Version > 0 and differs from the stored one.
+func (s *Store) DeleteWith(ctx context.Context, userUID string, id int64, opts WriteOptions) error {
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return fmt.Errorf("delete transaction: %w", err)
 	}
 	defer func() { _ = tx.Rollback() }()
 
-	cur, err := scan(tx.QueryRowContext(ctx, `SELECT `+selectCols+` FROM transactions WHERE id = ?`, id))
+	cur, err := scan(tx.QueryRowContext(ctx, `SELECT `+selectCols+` FROM transactions WHERE id = ? AND user_uid = ?`, id, userUID))
 	if errors.Is(err, sql.ErrNoRows) {
 		return ErrNotFound
 	}
@@ -322,7 +326,7 @@ func (s *Store) DeleteWith(ctx context.Context, id int64, opts WriteOptions) err
 	if _, err := tx.ExecContext(ctx, `DELETE FROM transactions WHERE id = ?`, id); err != nil {
 		return fmt.Errorf("delete transaction: %w", err)
 	}
-	if err := applyBalanceEffects(ctx, tx, &cur, nil, s.nowRFC3339()); err != nil {
+	if err := applyBalanceEffects(ctx, tx, userUID, &cur, nil, s.nowRFC3339()); err != nil {
 		return err
 	}
 	if err := tx.Commit(); err != nil {

@@ -11,19 +11,17 @@ import (
 	"github.com/nutmos/expensetrackr/pkg/transaction"
 )
 
-// fixClock pins the balance adjustment clock to 2026-10-08 21:30:00 +08:00.
-func fixClock(t *testing.T) {
+// fixClock pins the store clock used for balance adjustments.
+func fixClock(t *testing.T, st *Store) {
 	t.Helper()
 	at := time.Date(2026, 10, 8, 21, 30, 0, 123, time.FixedZone("SGT", 8*3600))
-	old := clock
-	clock = func() time.Time { return at }
-	t.Cleanup(func() { clock = old })
+	st.now = func() time.Time { return at }
 }
 
 // edit runs a manual balance edit (the PUT path).
 func (f *fixture) edit(b balance.Balance, opts WriteOptions, mut func(*balance.Input)) (balance.Balance, error) {
 	f.t.Helper()
-	return f.st.UpdateBalanceWith(context.Background(), b.ID, opts, func(cur balance.Balance) (balance.Balance, error) {
+	return f.st.UpdateBalanceWith(context.Background(), f.userUID, b.ID, opts, func(cur balance.Balance) (balance.Balance, error) {
 		in := cur.Input()
 		mut(&in)
 		return in.ValidateUpdate(cur.Type)
@@ -32,7 +30,7 @@ func (f *fixture) edit(b balance.Balance, opts WriteOptions, mut func(*balance.I
 
 func (f *fixture) adjustments() []transaction.Transaction {
 	f.t.Helper()
-	got, err := f.st.List(context.Background(), ListFilter{Type: transaction.BalanceAdjustment})
+	got, err := f.st.List(context.Background(), f.userUID, ListFilter{Type: transaction.BalanceAdjustment})
 	if err != nil {
 		f.t.Fatal(err)
 	}
@@ -40,8 +38,8 @@ func (f *fixture) adjustments() []transaction.Transaction {
 }
 
 func TestManualEditRecordsAdjustment(t *testing.T) {
-	fixClock(t)
 	f := newFixture(t)
+	fixClock(t, f.st)
 	cases := []struct {
 		b      balance.Balance
 		mut    func(*balance.Input)
@@ -87,16 +85,16 @@ func TestManualEditRecordsAdjustment(t *testing.T) {
 	// Ordinary transactions are not affected and do not show up in the filter.
 	f.create(f.tx("expense", "10", "THB", f.pay, nil))
 	f.want(f.pay, "940.00", 3)
-	all, _ := f.st.List(context.Background(), ListFilter{})
+	all, _ := f.st.List(context.Background(), f.userUID, ListFilter{})
 	if len(all) != 5 || len(f.adjustments()) != 4 {
 		t.Errorf("list %d, adjustments %d", len(all), len(f.adjustments()))
 	}
-	exp, _ := f.st.List(context.Background(), ListFilter{Type: transaction.Expense})
+	exp, _ := f.st.List(context.Background(), f.userUID, ListFilter{Type: transaction.Expense})
 	if len(exp) != 1 {
 		t.Errorf("expense filter: %d", len(exp))
 	}
 	// Deleting the expense reverses only the expense.
-	if err := f.st.DeleteWith(context.Background(), exp[0].ID, WriteOptions{}); err != nil {
+	if err := f.st.DeleteWith(context.Background(), f.userUID, exp[0].ID, WriteOptions{}); err != nil {
 		t.Fatal(err)
 	}
 	f.want(f.pay, "950.00", 4)
@@ -161,46 +159,47 @@ func TestAdjustmentIsReadOnly(t *testing.T) {
 		t.Fatal(err)
 	}
 	adj := f.adjustments()[0]
-	if _, err := f.st.UpdateWith(ctx, adj.ID, WriteOptions{Version: 1}, func(cur transaction.Transaction) (transaction.Transaction, error) {
+	if _, err := f.st.UpdateWith(ctx, f.userUID, adj.ID, WriteOptions{Version: 1}, func(cur transaction.Transaction) (transaction.Transaction, error) {
 		cur.Note = "x"
 		return cur, nil
 	}); !errors.Is(err, ErrReadOnly) {
 		t.Errorf("update adjustment: %v", err)
 	}
-	if err := f.st.DeleteWith(ctx, adj.ID, WriteOptions{}); !errors.Is(err, ErrReadOnly) {
+	if err := f.st.DeleteWith(ctx, f.userUID, adj.ID, WriteOptions{}); !errors.Is(err, ErrReadOnly) {
 		t.Errorf("delete adjustment: %v", err)
 	}
 	// Neither can one be created, nor an ordinary transaction turned into one.
 	e := f.tx("expense", "5", "THB", f.pay, nil)
 	e.Type = transaction.BalanceAdjustment
-	if err := f.st.Create(ctx, &e); !errors.Is(err, ErrReadOnly) {
+	if err := f.st.Create(ctx, f.userUID, &e); !errors.Is(err, ErrReadOnly) {
 		t.Errorf("create adjustment: %v", err)
 	}
 	exp := f.create(f.tx("expense", "5", "THB", f.pay, nil))
-	if _, err := f.st.UpdateWith(ctx, exp.ID, WriteOptions{}, func(cur transaction.Transaction) (transaction.Transaction, error) {
+	if _, err := f.st.UpdateWith(ctx, f.userUID, exp.ID, WriteOptions{}, func(cur transaction.Transaction) (transaction.Transaction, error) {
 		cur.Type = transaction.BalanceAdjustment
 		return cur, nil
 	}); !errors.Is(err, ErrReadOnly) {
 		t.Errorf("update to adjustment: %v", err)
 	}
-	if got, _ := f.st.Get(ctx, adj.ID); got.Version != 1 || got.Note != adj.Note {
+	if got, _ := f.st.Get(ctx, f.userUID, adj.ID); got.Version != 1 || got.Note != adj.Note {
 		t.Errorf("adjustment changed: %+v", got)
 	}
 	f.want(f.pay, "895.00", 3)
 
 	// The table itself refuses adjustment rows that would move a balance or
 	// carry a destination/category, and a direction on other types.
+	uid := f.userUID
 	for _, q := range []string{
-		`INSERT INTO transactions (uid, type, amount_minor, amount_scale, currency, balance_uid, account, spent_at, spent_at_unix, created_at, balance_applied, adjustment_direction)
-		 VALUES ('aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa1', 'balance_adjustment', 1, 2, 'THB', '` + string(f.pay.UID) + `', 'pay', 'x', 0, 'x', 1, 'increase')`,
-		`INSERT INTO transactions (uid, type, amount_minor, amount_scale, currency, balance_uid, account, spent_at, spent_at_unix, created_at, adjustment_direction)
-		 VALUES ('aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa2', 'balance_adjustment', 1, 2, 'THB', '` + string(f.pay.UID) + `', 'pay', 'x', 0, 'x', NULL)`,
-		`INSERT INTO transactions (uid, type, amount_minor, amount_scale, currency, balance_uid, account, spent_at, spent_at_unix, created_at, adjustment_direction)
-		 VALUES ('aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa3', 'expense', 1, 2, 'THB', '` + string(f.pay.UID) + `', 'pay', 'x', 0, 'x', 'increase')`,
-		`INSERT INTO transactions (uid, type, amount_minor, amount_scale, currency, balance_uid, account, spent_at, spent_at_unix, created_at, adjustment_direction, to_balance_uid)
-		 VALUES ('aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa4', 'balance_adjustment', 1, 2, 'THB', '` + string(f.pay.UID) + `', 'pay', 'x', 0, 'x', 'increase', '` + string(f.card.UID) + `')`,
-		`INSERT INTO transactions (uid, type, amount_minor, amount_scale, currency, balance_uid, account, spent_at, spent_at_unix, created_at, adjustment_direction)
-		 VALUES ('aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa5', 'balance_adjustment', 1, 2, 'THB', '` + string(f.pay.UID) + `', 'pay', 'x', 0, 'x', 'sideways')`,
+		`INSERT INTO transactions (uid, user_uid, type, amount_minor, amount_scale, currency, balance_uid, account, spent_at, spent_at_unix, created_at, balance_applied, adjustment_direction)
+		 VALUES ('aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa1', '` + uid + `', 'balance_adjustment', 1, 2, 'THB', '` + string(f.pay.UID) + `', 'pay', 'x', 0, 'x', 1, 'increase')`,
+		`INSERT INTO transactions (uid, user_uid, type, amount_minor, amount_scale, currency, balance_uid, account, spent_at, spent_at_unix, created_at, adjustment_direction)
+		 VALUES ('aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa2', '` + uid + `', 'balance_adjustment', 1, 2, 'THB', '` + string(f.pay.UID) + `', 'pay', 'x', 0, 'x', NULL)`,
+		`INSERT INTO transactions (uid, user_uid, type, amount_minor, amount_scale, currency, balance_uid, account, spent_at, spent_at_unix, created_at, adjustment_direction)
+		 VALUES ('aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa3', '` + uid + `', 'expense', 1, 2, 'THB', '` + string(f.pay.UID) + `', 'pay', 'x', 0, 'x', 'increase')`,
+		`INSERT INTO transactions (uid, user_uid, type, amount_minor, amount_scale, currency, balance_uid, account, spent_at, spent_at_unix, created_at, adjustment_direction, to_balance_uid)
+		 VALUES ('aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa4', '` + uid + `', 'balance_adjustment', 1, 2, 'THB', '` + string(f.pay.UID) + `', 'pay', 'x', 0, 'x', 'increase', '` + string(f.card.UID) + `')`,
+		`INSERT INTO transactions (uid, user_uid, type, amount_minor, amount_scale, currency, balance_uid, account, spent_at, spent_at_unix, created_at, adjustment_direction)
+		 VALUES ('aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa5', '` + uid + `', 'balance_adjustment', 1, 2, 'THB', '` + string(f.pay.UID) + `', 'pay', 'x', 0, 'x', 'sideways')`,
 	} {
 		if _, err := f.st.db.Exec(q); err == nil || !strings.Contains(err.Error(), "CHECK") {
 			t.Errorf("CHECK did not reject: %v\n%s", err, q)
