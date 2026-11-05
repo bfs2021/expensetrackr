@@ -289,6 +289,8 @@ All errors are JSON `{"error": "...", "fields": {...}, "code": "..."}`.
 
 ## More
 
+- Focused create-only skill (Bearer token): [expensetrackr-log-transaction](../expensetrackr-log-transaction/SKILL.md).
+
 - [reference.md](reference.md): every endpoint, field and query parameter;
   balances and categories CRUD; currencies and exchange-rate endpoints;
   response shapes; the helper script.
