@@ -90,6 +90,8 @@ tags:
     description: Expense and income categories. Categories belong to the logged-in user (each user has their own set; another user's category uid is a 404). Expense transactions may only use expense categories, income transactions income categories.
   - name: auth
     description: Login, logout, first-run registration, current user and password change.
+  - name: tokens
+    description: 'Personal API tokens for scripts and AI agents (`Authorization: Bearer ext_...`). Managing tokens needs a browser session; a token cannot list, create or revoke tokens (403 `session_required`).'
   - name: users
     description: User profiles (password hashes are never returned; `has_password` instead).
   - name: meta
@@ -97,6 +99,7 @@ tags:
 
 security:
   - cookieAuth: []
+  - bearerAuth: []
 
 paths:
   /api/transactions:
@@ -1084,6 +1087,73 @@ paths:
         '415': { $ref: '#/components/responses/UnsupportedMediaType' }
         '422': { $ref: '#/components/responses/ValidationFailed' }
 
+  /api/tokens:
+    get:
+      tags: [tokens]
+      operationId: listTokens
+      summary: List your API tokens
+      description: Active (not revoked) tokens of the logged-in user, newest first. Secrets and hashes are never returned. Session only; a Bearer token gets 403 `session_required`.
+      security:
+        - cookieAuth: []
+      responses:
+        '200':
+          description: Your tokens.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/APITokenList' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/SessionRequired' }
+    post:
+      tags: [tokens]
+      operationId: createToken
+      summary: Create an API token
+      description: |
+        Creates a token for the logged-in user and returns its plaintext in `token` **once**; only its SHA-256 is stored. Scopes: `read` (GET/HEAD only) and `write` (every method). Tokens can never manage tokens, change the password, register users or log out (403 `session_required`). Session only.
+      security:
+        - cookieAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/APITokenInput' }
+            example: { name: Expense agent, scopes: [read, write], expires_in_days: 90 }
+      responses:
+        '201':
+          description: The new token, with its plaintext secret (shown only this once).
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/APITokenCreated' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/SessionRequired' }
+        '415': { $ref: '#/components/responses/UnsupportedMediaType' }
+        '422': { $ref: '#/components/responses/ValidationFailed' }
+
+  /api/tokens/{uid}:
+    delete:
+      tags: [tokens]
+      operationId: revokeToken
+      summary: Revoke an API token
+      description: Revokes one of your own tokens; it stops working immediately. Another user's token, an unknown or an already revoked one is 404. Session only.
+      security:
+        - cookieAuth: []
+      parameters:
+        - name: uid
+          in: path
+          required: true
+          description: Token uid (UUID).
+          schema: { $ref: '#/components/schemas/Uid' }
+      responses:
+        '204': { description: Revoked. }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/SessionRequired' }
+        '404':
+          description: No such active token of yours.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+
 components:
   securitySchemes:
     cookieAuth:
@@ -1091,6 +1161,12 @@ components:
       in: cookie
       name: session
       description: Session cookie set by `POST /api/auth/login` (or first-run `POST /api/auth/register`).
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: ext_<43 base64url chars>
+      description: |
+        Personal API token from `POST /api/tokens` (Settings → API tokens), sent as `Authorization: Bearer ext_...`. When this header is present the cookie is ignored. Invalid, expired or revoked tokens and disabled users get 401 `invalid_token`; a `read` token on a non-GET request gets 403 `insufficient_scope`; session-only endpoints give 403 `session_required`. Bearer requests skip the Origin / Sec-Fetch-Site CSRF checks (bodies must still be `application/json`).
 
   parameters:
     TransactionUid:
@@ -1156,6 +1232,12 @@ components:
       schema: { type: string, example: /api/users/3525dd1f-ae96-4c71-b996-06a43679cfa2 }
 
   responses:
+    SessionRequired:
+      description: 'Called with an API token (`code: session_required`): this endpoint needs a browser session. Or a cross-site request (`code: csrf`).'
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+          example: { error: 'this endpoint requires a browser session; API tokens cannot use it', code: session_required }
     Unauthorized:
       description: 'Not logged in (no, unknown or expired session). `code` is `setup_required` while no account exists yet, else `unauthenticated`.'
       content:
@@ -1163,7 +1245,7 @@ components:
           schema: { $ref: '#/components/schemas/Error' }
           example: { error: authentication required, code: unauthenticated }
     Forbidden:
-      description: 'Cross-site request rejected (`code: csrf`), or registration closed (`code: registration_closed`).'
+      description: 'Cross-site request rejected (`code: csrf`), registration closed (`code: registration_closed`), a `read` API token on a mutating request (`code: insufficient_scope`), or an API token on a session-only endpoint (`code: session_required`).'
       content:
         application/json:
           schema: { $ref: '#/components/schemas/Error' }
@@ -1346,6 +1428,55 @@ components:
           example: { error: internal server error }
 
   schemas:
+    APITokenScope:
+      type: string
+      enum: [read, write]
+      description: '`read`: GET/HEAD only. `write`: every method.'
+    APIToken:
+      type: object
+      required: [uid, name, prefix, scopes, created_at, last_used_at, expires_at]
+      properties:
+        uid: { $ref: '#/components/schemas/Uid' }
+        name: { type: string, maxLength: 64, example: Expense agent }
+        prefix: { type: string, description: First characters of the token (non-secret) to tell tokens apart., example: ext_Ab12Cd34 }
+        scopes:
+          type: array
+          items: { $ref: '#/components/schemas/APITokenScope' }
+        created_at: { $ref: '#/components/schemas/Timestamp' }
+        last_used_at:
+          allOf: [{ $ref: '#/components/schemas/Timestamp' }]
+          nullable: true
+          description: Last successful use (updated at most once a minute); null if never used.
+        expires_at:
+          allOf: [{ $ref: '#/components/schemas/Timestamp' }]
+          nullable: true
+          description: null means the token does not expire.
+    APITokenCreated:
+      allOf:
+        - { $ref: '#/components/schemas/APIToken' }
+        - type: object
+          required: [token]
+          properties:
+            token: { type: string, description: The secret. Returned only in this response; store it safely., example: ext_Ab12Cd34Ef56Gh78Ij90Kl12Mn34Op56Qr78St90Uv1 }
+    APITokenInput:
+      type: object
+      required: [name, scopes]
+      additionalProperties: false
+      properties:
+        name: { type: string, minLength: 1, maxLength: 64, description: Trimmed; 1–64 characters., example: Expense agent }
+        scopes:
+          type: array
+          minItems: 1
+          items: { $ref: '#/components/schemas/APITokenScope' }
+        expires_in_days: { type: integer, minimum: 1, maximum: 3650, description: Omit for a token that never expires. }
+    APITokenList:
+      type: object
+      required: [tokens, count]
+      properties:
+        tokens:
+          type: array
+          items: { $ref: '#/components/schemas/APIToken' }
+        count: { type: integer }
     Uid:
       type: string
       format: uuid

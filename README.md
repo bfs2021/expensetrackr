@@ -92,6 +92,19 @@ cookie jar, auto-login from `EXPENSETRACKR_USERNAME` / `EXPENSETRACKR_PASSWORD`
 and GET → PUT edits with conflict retry. Copy or symlink the folder into your
 agent's skills directory (e.g. `~/.claude/skills/` or `.cursor/skills/`).
 
+**API tokens** are the simpler option for agents: create one in
+**Settings → API tokens** (e.g. named "Expense agent", scope `read` or
+`write`), copy it once, and send it as a Bearer header — no login, cookie jar
+or `Origin` header needed:
+
+```sh
+curl -H "Authorization: Bearer $EXPENSE_TOKEN" http://127.0.0.1:8080/api/transactions
+```
+
+Tokens can't manage tokens, change the password or log out (403
+`session_required`); a `read` token gets 403 `insufficient_scope` on writes.
+See [docs/auth.md](docs/auth.md#api-tokens).
+
 ## Test
 
 ```bash
@@ -374,7 +387,7 @@ created by this code is tagged with `PRAGMA application_id = 0x45585452`
 - **New, empty database** (missing or zero-byte file): the baseline is
   created in one SQL transaction together with `user_version = 1` and the
   application id. Logged as `store: migrated schema to version 1`.
-- **Existing baseline database:** pending migrations (none yet) run in order,
+- **Existing database:** pending migrations (v2: `api_tokens`) run in order,
   each in one SQL transaction with its `user_version` bump.
 - **Database from before the baseline reset** (the old `user_version` 1–18
   history, or any non-empty file without the application id) or **from a
@@ -387,6 +400,7 @@ created by this code is tagged with `PRAGMA application_id = 0x45585452`
 | Version | Change |
 |---------|--------|
 | 1       | baseline: `transactions`, `balances`, `users`, `user_identities`, `sessions`, `user_categories`, `meta`, `fx_rates`, `fx_rate_lookups` and their indexes |
+| 2       | `api_tokens` (personal API tokens, hash only) and `idx_api_tokens_user_uid` |
 
 To change the schema, append a migration to `migrations` in
 `pkg/store/migrate.go` (it becomes v2, then v3, ...) instead of editing the
@@ -396,7 +410,8 @@ runs every step from 0, so it always matches an upgraded one.
 ## API
 
 **Authentication** ([docs/auth.md](docs/auth.md)): every `/api` route needs a
-session cookie (from `POST /api/auth/login`) except login, register (first run
+session cookie (from `POST /api/auth/login`) or an API token
+(`Authorization: Bearer ext_...`) except login, register (first run
 only), logout, `/api/healthz` and the OpenAPI documents; otherwise **401**
 `{"error":"authentication required","code":"unauthenticated"}`.
 State-changing requests must be same-origin (`Origin` / `Sec-Fetch-Site`,
@@ -444,6 +459,9 @@ only on validation, conflict and duplicate-name errors.
 | POST   | `/api/auth/logout`     | 204 | Deletes the session, clears the cookie |
 | GET    | `/api/auth/me`         | 200 + user | 401 when signed out (`code: setup_required` before the first account exists) |
 | PUT    | `/api/auth/password`   | 204 | `current_password`, `new_password`; logs out all other sessions |
+| GET    | `/api/tokens`          | 200 `{"tokens":[...],"count":n}` | Session only. Your active API tokens (display prefix, never the secret) |
+| POST   | `/api/tokens`          | 201 + token incl. `token` (shown once) | Session only. `name` (≤ 64 chars), `scopes` (`read`, `write`), optional `expires_in_days` (1–3650); 422 invalid |
+| DELETE | `/api/tokens/:uid`     | 204 | Session only. Revokes; 404 not yours / unknown |
 | POST   | `/api/users`           | 201 + user, `Location: /api/users/<uid>` | `display_name` required; `username`, `email`, `preferences` (object, see below) optional. 422 invalid, 409 duplicate username/email, 400 unknown fields (incl. `password`, `password_hash`) |
 | GET    | `/api/users`           | 200 `{"users":[...],"count":n}` | Oldest first |
 | GET    | `/api/users/:uid`      | 200 + user | Never includes `password_hash`; `has_password` instead |

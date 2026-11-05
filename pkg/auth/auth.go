@@ -161,3 +161,24 @@ func (t *Throttle) pruneLocked(now time.Time) {
 		}
 	}
 }
+
+// Personal API tokens (docs/auth.md, "API tokens").
+const (
+	// APITokenPrefix starts every API token so it is recognizable in logs,
+	// config files and secret scanners.
+	APITokenPrefix = "ext_"
+	// APITokenDisplayLen is how many leading characters of a token (prefix
+	// included) are kept as a non-secret hint for lists.
+	APITokenDisplayLen = len(APITokenPrefix) + 8
+)
+
+// NewAPIToken returns a new API token (APITokenPrefix + 32 random bytes,
+// base64url) and its non-secret display prefix.
+func NewAPIToken() (token, display string, err error) {
+	raw, err := NewToken()
+	if err != nil {
+		return "", "", err
+	}
+	token = APITokenPrefix + raw
+	return token, token[:APITokenDisplayLen], nil
+}

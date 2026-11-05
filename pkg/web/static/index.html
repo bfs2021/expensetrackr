@@ -329,6 +329,54 @@
         </div>
       </form>
     </section>
+    <section class="card form-card" id="tokens-card">
+      <h2>API tokens</h2>
+      <p class="muted">Personal tokens let scripts and AI agents call the API as you, with <code>Authorization: Bearer &lt;token&gt;</code>. Tokens cannot manage tokens or change your password.</p>
+      <div id="t-new" class="token-new" hidden>
+        <p><strong>Copy your new token now. It won’t be shown again.</strong></p>
+        <div class="token-secret-row">
+          <input id="t-new-value" type="text" readonly aria-label="New API token">
+          <button type="button" id="t-copy-btn">Copy</button>
+        </div>
+        <span id="t-copy-status" class="muted" role="status"></span>
+      </div>
+      <div class="table-wrap">
+        <table id="token-table">
+          <thead><tr><th>Name</th><th>Token</th><th>Scopes</th><th>Created</th><th>Last used</th><th>Expires</th><th></th></tr></thead>
+          <tbody></tbody>
+        </table>
+      </div>
+      <p id="t-empty" class="group-empty" hidden>No API tokens yet.</p>
+      <h3>Create a token</h3>
+      <form id="token-form" novalidate>
+        <div class="grid">
+          <label>Name
+            <input id="t-name" name="name" type="text" maxlength="64" required placeholder="Expense agent">
+            <small class="err" data-for="name"></small>
+          </label>
+          <label>Access
+            <select id="t-scopes" name="scopes" required>
+              <option value="read">Read only (GET)</option>
+              <option value="write">Read and write</option>
+            </select>
+            <small class="err" data-for="scopes"></small>
+          </label>
+          <label>Expires
+            <select id="t-expiry" name="expires_in_days">
+              <option value="30">In 30 days</option>
+              <option value="90">In 90 days</option>
+              <option value="365">In 1 year</option>
+              <option value="">Never</option>
+            </select>
+            <small class="err" data-for="expires_in_days"></small>
+          </label>
+        </div>
+        <div class="actions">
+          <button type="submit" id="t-submit-btn">Create token</button>
+          <span id="t-form-status" role="status"></span>
+        </div>
+      </form>
+    </section>
     </div>
 
     <div id="view-notfound" class="view" hidden>

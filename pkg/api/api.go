@@ -65,6 +65,7 @@ func (s *Server) Router() *gin.Engine {
 	s.registerBalanceRoutes(api)
 	s.registerCategoryRoutes(api)
 	s.registerUserRoutes(api)
+	s.registerTokenRoutes(api)
 	api.GET("/exchange-rates", s.getExchangeRate)
 	api.GET("/currencies", func(c *gin.Context) {
 		cs := money.Currencies()
