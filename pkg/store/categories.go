@@ -152,9 +152,9 @@ func nameTaken(cats []category.Category, c category.Category, skipUID common_typ
 	return false
 }
 
-func indexOfCategory(cats []category.Category, uid string) int {
+func indexOfCategory(cats []category.Category, uid common_type.UID) int {
 	for i, c := range cats {
-		if c.UID.Matches(uid) {
+		if c.UID.Matches(uid.String()) {
 			return i
 		}
 	}
@@ -227,7 +227,7 @@ func (s *Store) ListCategories(ctx context.Context, userUID string, typ category
 
 // GetCategoryByUID returns one of the user's categories or ErrNotFound
 // (also when the uid belongs to another user).
-func (s *Store) GetCategoryByUID(ctx context.Context, userUID, uid string) (category.Category, error) {
+func (s *Store) GetCategoryByUID(ctx context.Context, userUID string, uid common_type.UID) (category.Category, error) {
 	cats, _, err := readUserCategories(ctx, s.db, userUID)
 	if err != nil {
 		return category.Category{}, err
@@ -248,7 +248,7 @@ func countCategoryRefs(ctx context.Context, tx *sql.Tx, userUID string, uid comm
 // result (read-modify-write of the user's row, see modifyCategories). A type
 // change is rejected with ErrCategoryInUse when any transaction references
 // the category. UID/CreatedAt are preserved.
-func (s *Store) UpdateCategory(ctx context.Context, userUID, uid string, fn func(cur category.Category) (category.Category, error)) (category.Category, error) {
+func (s *Store) UpdateCategory(ctx context.Context, userUID string, uid common_type.UID, fn func(cur category.Category) (category.Category, error)) (category.Category, error) {
 	var result category.Category
 	err := s.modifyCategories(ctx, userUID, func(tx *sql.Tx, cats []category.Category) ([]category.Category, error) {
 		i := indexOfCategory(cats, uid)
@@ -288,7 +288,7 @@ func (s *Store) UpdateCategory(ctx context.Context, userUID, uid string, fn func
 // DeleteCategory removes one of the user's categories. Returns
 // ErrCategoryInUse if any transaction references it, ErrNotFound if the user
 // has no such category.
-func (s *Store) DeleteCategory(ctx context.Context, userUID, uid string) error {
+func (s *Store) DeleteCategory(ctx context.Context, userUID string, uid common_type.UID) error {
 	return s.modifyCategories(ctx, userUID, func(tx *sql.Tx, cats []category.Category) ([]category.Category, error) {
 		i := indexOfCategory(cats, uid)
 		if i < 0 {

@@ -21,7 +21,7 @@ func mkCat(t *testing.T, h http.Handler, name, typ string) map[string]any {
 func TestCategoriesCRUD(t *testing.T) {
 	h := newTestServer(t)
 	food := mkCat(t, h, "Food", "expense")
-	if _, has := food["id"]; has || !uuidV4RE.MatchString(food["uid"].(string)) || food["updated_at"] != nil {
+	if _, has := food["id"]; has || !isUUIDv4(food["uid"].(string)) || food["updated_at"] != nil {
 		t.Fatalf("create body: %v", food)
 	}
 	mkCat(t, h, "Salary", "income")

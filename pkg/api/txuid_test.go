@@ -3,12 +3,9 @@ package api
 import (
 	"fmt"
 	"net/http"
-	"regexp"
 	"strings"
 	"testing"
 )
-
-var uuidV4RE = regexp.MustCompile(`^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$`)
 
 func TestTransactionUID(t *testing.T) {
 	h := newTestServer(t)
@@ -22,7 +19,7 @@ func TestTransactionUID(t *testing.T) {
 		t.Fatalf("create: %d %v", rec.Code, created)
 	}
 	uid, _ := created["uid"].(string)
-	if !uuidV4RE.MatchString(uid) || uid == "00000000-0000-4000-8000-000000000000" {
+	if !isUUIDv4(uid) || uid == "00000000-0000-4000-8000-000000000000" {
 		t.Fatalf("create uid = %q (must be server-assigned UUID v4)", uid)
 	}
 	if _, hasID := created["id"]; hasID {

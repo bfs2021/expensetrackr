@@ -11,7 +11,6 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
-	"strings"
 	"time"
 
 	"github.com/nutmos/expensetrackr/pkg/common_type"
@@ -154,7 +153,7 @@ type ListFilter struct {
 	From        *time.Time       // inclusive
 	To          *time.Time       // inclusive
 	Type        transaction.Type // "" = all
-	CategoryUID string           // "" = all
+	CategoryUID common_type.UID  // "" = all
 	Limit       int
 }
 
@@ -217,8 +216,8 @@ func (s *Store) Get(ctx context.Context, userUID string, id int64) (transaction.
 
 // GetByUID returns one row from transactions by its UUID for userUID or
 // ErrNotFound (including when the uid belongs to another user).
-func (s *Store) GetByUID(ctx context.Context, userUID, uid string) (transaction.Transaction, error) {
-	row := s.db.QueryRowContext(ctx, `SELECT `+selectCols+` FROM transactions WHERE uid = ? AND user_uid = ?`, strings.ToLower(strings.TrimSpace(uid)), userUID)
+func (s *Store) GetByUID(ctx context.Context, userUID string, uid common_type.UID) (transaction.Transaction, error) {
+	row := s.db.QueryRowContext(ctx, `SELECT `+selectCols+` FROM transactions WHERE uid = ? AND user_uid = ?`, uid, userUID)
 	e, err := scan(row)
 	if errors.Is(err, sql.ErrNoRows) {
 		return transaction.Transaction{}, ErrNotFound

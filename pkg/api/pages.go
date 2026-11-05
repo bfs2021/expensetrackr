@@ -2,9 +2,9 @@ package api
 
 import (
 	"net/http"
-	"strings"
 
 	"github.com/gin-gonic/gin"
+	"github.com/nutmos/expensetrackr/pkg/common_type"
 )
 
 // pageResources are the browsable resources of the web page. Each gets
@@ -36,7 +36,7 @@ func (s *Server) registerPageRoutes(r *gin.Engine) {
 // (any case; the client lowercases it). Whether the record exists is checked
 // by the page itself through the API, so a deleted uid shows a message there.
 func (s *Server) editPage(c *gin.Context) {
-	if !uuidRE.MatchString(strings.ToLower(c.Param("uid"))) {
+	if !common_type.NormalizeUID(c.Param("uid")).Valid() {
 		c.JSON(http.StatusNotFound, errorBody{Error: "not found"})
 		return
 	}

@@ -3,10 +3,10 @@ package api
 import (
 	"errors"
 	"net/http"
-	"regexp"
 	"strings"
 
 	"github.com/nutmos/expensetrackr/pkg/balance"
+	"github.com/nutmos/expensetrackr/pkg/common_type"
 	"github.com/nutmos/expensetrackr/pkg/store"
 
 	"github.com/gin-gonic/gin"
@@ -56,19 +56,6 @@ func (s *Server) resolveBalance(c *gin.Context) (balance.Balance, bool) {
 	}
 	return b, true
 }
-
-// pathUID reads the :uid path parameter, lowercases it and checks it has the
-// canonical UUID shape (8-4-4-4-12 hex). Writes 400 and returns false if not.
-func pathUID(c *gin.Context) (string, bool) {
-	uid := strings.ToLower(strings.TrimSpace(c.Param("uid")))
-	if !uuidRE.MatchString(uid) {
-		c.JSON(http.StatusBadRequest, errorBody{Error: "uid must be a UUID (xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx)"})
-		return "", false
-	}
-	return uid, true
-}
-
-var uuidRE = regexp.MustCompile(`^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$`)
 
 func (s *Server) createBalance(c *gin.Context) {
 	var in balance.Input
@@ -133,7 +120,7 @@ func (s *Server) getBalance(c *gin.Context) {
 
 // balanceConflict answers 409 with the balance as it is now (or 404 if it was
 // deleted meanwhile).
-func (s *Server) balanceConflict(c *gin.Context, uid string) {
+func (s *Server) balanceConflict(c *gin.Context, uid common_type.UID) {
 	cur, err := s.Store.GetBalanceByUID(c.Request.Context(), sessionUserUID(c), uid)
 	if err != nil {
 		writeBalanceError(c, err)
@@ -146,12 +133,12 @@ func (s *Server) balanceConflict(c *gin.Context, uid string) {
 // response: 200 + ETag, 409 on a stale version, or the mapped error.
 func (s *Server) saveBalance(c *gin.Context, cur balance.Balance, opts store.WriteOptions, fn func(existing balance.Balance) (balance.Balance, error)) {
 	if cur.Version != opts.Version { // fail fast; re-checked inside the write
-		s.balanceConflict(c, string(cur.UID))
+		s.balanceConflict(c, cur.UID)
 		return
 	}
 	updated, err := s.Store.UpdateBalanceWith(c.Request.Context(), sessionUserUID(c), cur.ID, opts, fn)
 	if errors.Is(err, store.ErrVersionConflict) {
-		s.balanceConflict(c, string(cur.UID))
+		s.balanceConflict(c, cur.UID)
 		return
 	}
 	if err != nil {
@@ -199,7 +186,7 @@ func (s *Server) deleteBalance(c *gin.Context) {
 	}
 	err := s.Store.DeleteBalanceWith(c.Request.Context(), sessionUserUID(c), cur.ID, store.WriteOptions{Version: version})
 	if errors.Is(err, store.ErrVersionConflict) {
-		s.balanceConflict(c, string(cur.UID))
+		s.balanceConflict(c, cur.UID)
 		return
 	}
 	if err != nil {

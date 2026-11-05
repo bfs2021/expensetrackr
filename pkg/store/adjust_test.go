@@ -64,7 +64,7 @@ func newFixture(t *testing.T) *fixture {
 // amount returns "balance" for assets and "debt" for liabilities, plus version.
 func (f *fixture) amount(b balance.Balance) (string, int64) {
 	f.t.Helper()
-	got, err := f.st.GetBalanceByUID(context.Background(), f.userUID, string(b.UID))
+	got, err := f.st.GetBalanceByUID(context.Background(), f.userUID, b.UID)
 	if err != nil {
 		f.t.Fatal(err)
 	}
@@ -172,12 +172,12 @@ func TestBalanceSignRules(t *testing.T) {
 func TestOverLimitStillComputed(t *testing.T) {
 	f := newFixture(t)
 	f.create(f.tx("expense", "950", "THB", f.card, nil))
-	got, _ := f.st.GetBalanceByUID(context.Background(), f.userUID, string(f.card.UID))
+	got, _ := f.st.GetBalanceByUID(context.Background(), f.userUID, f.card.UID)
 	if *got.Debt != "1050.00" || !*got.OverLimit || *got.Available != "-50.00" {
 		t.Errorf("over limit: debt %s over %v avail %s", *got.Debt, *got.OverLimit, *got.Available)
 	}
 	f.create(f.tx("transfer", "1100", "THB", f.pay, &f.card))
-	got, _ = f.st.GetBalanceByUID(context.Background(), f.userUID, string(f.card.UID))
+	got, _ = f.st.GetBalanceByUID(context.Background(), f.userUID, f.card.UID)
 	if *got.Debt != "-50.00" || *got.OverLimit || *got.Available != "1050.00" {
 		t.Errorf("in credit: debt %s over %v avail %s", *got.Debt, *got.OverLimit, *got.Available)
 	}
@@ -402,7 +402,7 @@ func TestConcurrentWritesStayConsistent(t *testing.T) {
 	f.want(f.card, "80.00", 1+n/2)
 
 	// Many clients PUT the same balance from the same version: exactly one wins.
-	b, _ := f.st.GetBalanceByUID(ctx, f.userUID, string(f.gold.UID))
+	b, _ := f.st.GetBalanceByUID(ctx, f.userUID, f.gold.UID)
 	var mu sync.Mutex
 	wins, conflicts := 0, 0
 	for i := 0; i < n; i++ {

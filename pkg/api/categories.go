@@ -119,7 +119,7 @@ func (s *Server) replaceCategory(c *gin.Context) {
 		writeCategoryError(c, err)
 		return
 	}
-	updated, err := s.Store.UpdateCategory(c.Request.Context(), sessionUserUID(c), string(cur.UID), func(category.Category) (category.Category, error) {
+	updated, err := s.Store.UpdateCategory(c.Request.Context(), sessionUserUID(c), cur.UID, func(category.Category) (category.Category, error) {
 		return next, nil
 	})
 	if err != nil {
@@ -135,7 +135,7 @@ func (s *Server) deleteCategory(c *gin.Context) {
 	if !ok {
 		return
 	}
-	if err := s.Store.DeleteCategory(c.Request.Context(), sessionUserUID(c), string(cur.UID)); err != nil {
+	if err := s.Store.DeleteCategory(c.Request.Context(), sessionUserUID(c), cur.UID); err != nil {
 		writeCategoryError(c, err)
 		return
 	}

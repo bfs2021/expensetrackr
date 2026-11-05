@@ -131,7 +131,7 @@ func (s *Store) GetBalance(ctx context.Context, userUID string, id int64) (balan
 
 // GetBalanceByUID returns one balance by its UUID for userUID or ErrNotFound
 // (including when the uid belongs to another user).
-func (s *Store) GetBalanceByUID(ctx context.Context, userUID, uid string) (balance.Balance, error) {
+func (s *Store) GetBalanceByUID(ctx context.Context, userUID string, uid common_type.UID) (balance.Balance, error) {
 	b, err := scanBalance(s.db.QueryRowContext(ctx, `SELECT `+balanceCols+` FROM balances WHERE uid = ? AND user_uid = ?`, uid, userUID))
 	if errors.Is(err, sql.ErrNoRows) {
 		return balance.Balance{}, ErrNotFound

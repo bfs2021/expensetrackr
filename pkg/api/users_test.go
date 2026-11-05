@@ -45,7 +45,7 @@ func TestUsersCRUD(t *testing.T) {
 		t.Fatalf("create: %d %s", rec.Code, rec.Body)
 	}
 	uid, _ := u["uid"].(string)
-	if !uuidV4RE.MatchString(uid) || rec.Header().Get("Location") != "/api/users/"+uid ||
+	if !isUUIDv4(uid) || rec.Header().Get("Location") != "/api/users/"+uid ||
 		u["display_name"] != "Nat" || u["username"] != "nat" || u["email"] != "nat@example.com" ||
 		u["status"] != "active" || u["has_password"] != false || u["email_verified_at"] != nil ||
 		u["last_login_at"] != nil || u["password_updated_at"] != nil || u["updated_at"] != nil {

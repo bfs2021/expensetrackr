@@ -35,7 +35,7 @@ func TestUserStore(t *testing.T) {
 
 	a := newUser(t, st, user.Input{DisplayName: "Alice", Username: sp("Alice"), Email: sp("Alice@Example.com"),
 		Preferences: json.RawMessage(`{ "base_currency": "thb" }`)})
-	if !uuidV4.MatchString(a.UID) || *a.Username != "alice" || *a.Email != "alice@example.com" ||
+	if !isUUIDv4(a.UID) || *a.Username != "alice" || *a.Email != "alice@example.com" ||
 		a.Preferences.BaseCurrency != "THB" || a.Status != user.StatusActive || a.HasPassword {
 		t.Fatalf("created: %+v", a)
 	}
@@ -102,7 +102,7 @@ func TestUserStore(t *testing.T) {
 
 	// Identities.
 	g := user.Identity{UserUID: a.UID, Provider: user.ProviderGoogle, ProviderSubject: " 1234567890 ", Email: sp("alice@gmail.com")}
-	if err := st.CreateIdentity(ctx, &g); err != nil || !uuidV4.MatchString(g.UID) || g.ProviderSubject != "1234567890" {
+	if err := st.CreateIdentity(ctx, &g); err != nil || !isUUIDv4(g.UID) || g.ProviderSubject != "1234567890" {
 		t.Fatalf("create identity: %+v %v", g, err)
 	}
 	ap := user.Identity{UserUID: a.UID, Provider: user.ProviderApple, ProviderSubject: "1234567890"}

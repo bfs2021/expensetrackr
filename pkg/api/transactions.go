@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/nutmos/expensetrackr/pkg/balance"
+	"github.com/nutmos/expensetrackr/pkg/common_type"
 	"github.com/nutmos/expensetrackr/pkg/store"
 	"github.com/nutmos/expensetrackr/pkg/transaction"
 	"github.com/nutmos/expensetrackr/pkg/validate"
@@ -27,7 +28,7 @@ func (s *Server) attachCategory(c *gin.Context, e *transaction.Transaction) erro
 	if e.CategoryUID == nil {
 		return nil
 	}
-	cat, err := s.Store.GetCategoryByUID(c.Request.Context(), sessionUserUID(c), string(*e.CategoryUID))
+	cat, err := s.Store.GetCategoryByUID(c.Request.Context(), sessionUserUID(c), *e.CategoryUID)
 	if errors.Is(err, store.ErrNotFound) {
 		return &validate.ValidationError{Fields: map[string]string{"category_uid": "does not match any category"}}
 	}
@@ -55,7 +56,7 @@ func (s *Server) registerTransactionRoutes(api *gin.RouterGroup) {
 // For a transfer it then fills the cross-currency fields (convertTransfer),
 // which may fetch an exchange rate; prev is the stored transaction on PUT.
 func (s *Server) attachPaymentBalance(c *gin.Context, e *transaction.Transaction, in transaction.CreateInput, prev *transaction.Transaction) error {
-	b, err := s.Store.GetBalanceByUID(c.Request.Context(), sessionUserUID(c), string(e.BalanceUID))
+	b, err := s.Store.GetBalanceByUID(c.Request.Context(), sessionUserUID(c), e.BalanceUID)
 	if errors.Is(err, store.ErrNotFound) {
 		return &validate.ValidationError{Fields: map[string]string{
 			"balance_uid": "does not match any balance",
@@ -74,7 +75,7 @@ func (s *Server) attachPaymentBalance(c *gin.Context, e *transaction.Transaction
 		e.ToBalanceUID, e.ToAccount = nil, nil
 		return s.convertTransfer(c, e, in, b, balance.Balance{}, prev)
 	}
-	to, err := s.Store.GetBalanceByUID(c.Request.Context(), sessionUserUID(c), string(*e.ToBalanceUID))
+	to, err := s.Store.GetBalanceByUID(c.Request.Context(), sessionUserUID(c), *e.ToBalanceUID)
 	if errors.Is(err, store.ErrNotFound) {
 		return &validate.ValidationError{Fields: map[string]string{
 			"to_balance_uid": "does not match any balance",
@@ -217,8 +218,8 @@ func (s *Server) listTransactions(c *gin.Context) {
 		}
 	}
 
-	if raw := strings.ToLower(strings.TrimSpace(c.Query("category_uid"))); raw != "" {
-		if uuidRE.MatchString(raw) {
+	if raw := common_type.NormalizeUID(c.Query("category_uid")); raw != "" {
+		if raw.Valid() {
 			f.CategoryUID = raw
 		} else {
 			fields["category_uid"] = "must be a UUID"

@@ -238,11 +238,11 @@ func TestPerUserStoreIsolation(t *testing.T) {
 		fn   func() error
 	}{
 		{"bob get alice balance", func() error {
-			_, err := st.GetBalanceByUID(ctx, bob.UID, string(aPay.UID))
+			_, err := st.GetBalanceByUID(ctx, bob.UID, aPay.UID)
 			return err
 		}},
 		{"bob get alice tx", func() error {
-			_, err := st.GetByUID(ctx, bob.UID, string(e.UID))
+			_, err := st.GetByUID(ctx, bob.UID, e.UID)
 			return err
 		}},
 		{"bob update alice tx", func() error {
