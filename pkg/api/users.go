@@ -50,7 +50,7 @@ func (s *Server) resolveUser(c *gin.Context) (user.User, bool) {
 	if !ok {
 		return user.User{}, false
 	}
-	u, err := s.Store.GetUserByUID(c.Request.Context(), uid)
+	u, err := s.Store.GetUserByUID(c.Request.Context(), uid.String())
 	if err != nil {
 		writeUserError(c, err)
 		return user.User{}, false

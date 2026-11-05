@@ -82,7 +82,7 @@ func TestBulkAtomicSuccess(t *testing.T) {
 	}
 	rs := results(t, b)
 	for i, r := range rs {
-		if int(r["index"].(float64)) != i || !looksLikeUID(r["transaction"].(map[string]any)["uid"]) {
+		if int(r["index"].(float64)) != i || !isUUIDv4(r["transaction"].(map[string]any)["uid"]) {
 			t.Errorf("result %d: %v", i, r)
 		}
 	}
