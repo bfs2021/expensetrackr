@@ -23,7 +23,7 @@ func TestCreateBulkStore(t *testing.T) {
 		{Err: errors.New("pre-validation failed")},
 	}
 	payBefore, _ := f.amount(f.pay)
-	out, err := f.st.CreateBulk(ctx, items, BulkOptions{Atomic: false})
+	out, err := f.st.CreateBulk(ctx, f.userUID, items, BulkOptions{Atomic: false})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -43,7 +43,7 @@ func TestCreateBulkStore(t *testing.T) {
 	}
 	// Atomic with a failure and dry run write nothing.
 	for _, opts := range []BulkOptions{{Atomic: true}, {Atomic: false, DryRun: true}} {
-		out, err := f.st.CreateBulk(ctx, []BulkItem{{Tx: f.tx("expense", "7", "THB", f.pay, nil)}, {Tx: bad}}, opts)
+		out, err := f.st.CreateBulk(ctx, f.userUID, []BulkItem{{Tx: f.tx("expense", "7", "THB", f.pay, nil)}, {Tx: bad}}, opts)
 		if err != nil || out.Committed {
 			t.Errorf("%+v: committed %v err %v", opts, out.Committed, err)
 		}
@@ -51,7 +51,7 @@ func TestCreateBulkStore(t *testing.T) {
 			t.Errorf("%+v: balance moved %s -> %s", opts, payAfter, now)
 		}
 	}
-	list, _ := f.st.List(ctx, ListFilter{})
+	list, _ := f.st.List(ctx, f.userUID, ListFilter{})
 	if len(list) != 1 {
 		t.Errorf("rows %d, want 1", len(list))
 	}

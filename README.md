@@ -6,7 +6,7 @@ web page and a JSON API. Data is stored in SQLite through the pure-Go
 
 Status: prototype for local use. It listens on 127.0.0.1 by default and
 requires a username/password login (server-side sessions); see
-[docs/auth.md](docs/auth.md). Data is not per-user yet.
+[docs/auth.md](docs/auth.md). Transactions, balances and categories are per user (issue #62).
 
 ## Requirements
 
@@ -236,8 +236,12 @@ Categories are **per user** (issue #34): every `/api/categories`
 call works on the logged-in user's own set, and another user's category uid
 is a 404. All of a user's categories are stored in **one row** of
 `user_categories` as a JSON array (at most 500 per user, 409 beyond). See
-[docs/categories.md](docs/categories.md). Transactions and balances are not
-per-user yet.
+[docs/categories.md](docs/categories.md).
+
+Transactions and balances are likewise **per user** (issue #62): every list,
+get, create, update and delete is scoped to the logged-in account (cookie
+session or Bearer API token). Another user's uid is a 404; a transaction may
+only reference that user's own balances and categories.
 
 Rules linking transactions and categories:
 
@@ -786,9 +790,9 @@ User data is only inserted with `textContent` / input `.value` (never
 
 ## Open questions
 
-- Authentication: username/password login exists (docs/auth.md). Follow-ups:
-  per-user ownership of transactions, balances and categories; SSO; roles;
-  password reset.
+- Authentication: username/password login exists (docs/auth.md). Transactions,
+  balances and categories are per user. Follow-ups: SSO; roles; password reset;
+  scoping `/api/users` ownership.
 - Currency conversion and reporting currency (e.g. totals in THB or SGD), and
   where exchange rates would come from.
 - Categories/tags, receipts or attachments; an edit history / audit log

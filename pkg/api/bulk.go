@@ -141,7 +141,7 @@ func (s *Server) bulkCreateTransactions(c *gin.Context) {
 	}
 
 	// Phase 2: one SQL transaction (rolled back for dry runs and failed atomic batches).
-	out, err := s.Store.CreateBulk(c.Request.Context(), items, store.BulkOptions{Atomic: atomic, DryRun: req.DryRun})
+	out, err := s.Store.CreateBulk(c.Request.Context(), sessionUserUID(c), items, store.BulkOptions{Atomic: atomic, DryRun: req.DryRun})
 	if err != nil {
 		internalError(c, err)
 		return

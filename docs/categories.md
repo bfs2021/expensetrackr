@@ -61,8 +61,8 @@ the **logged-in user's** categories:
   the **current user's** categories with a matching type. Otherwise the
   request fails with 422.
 
-Transactions and balances are **not** per-user yet (follow-up). The in-use
-check therefore counts every transaction.
+Transactions and balances are also per user (issue #62). The in-use check
+counts only the current user's transactions.
 
 ## Concurrency
 

@@ -35,7 +35,7 @@ func writeBalanceError(c *gin.Context, err error) {
 	} else if errors.Is(err, store.ErrDuplicateName) {
 		c.JSON(http.StatusConflict, errorBody{
 			Error:  "a balance with this name already exists",
-			Fields: map[string]string{"name": "is already used by another balance (names are case-insensitive)"},
+			Fields: map[string]string{"name": "is already used by another of your balances (names are case-insensitive)"},
 		})
 	} else {
 		writeInputError(c, err)
@@ -49,7 +49,7 @@ func (s *Server) resolveBalance(c *gin.Context) (balance.Balance, bool) {
 	if !ok {
 		return balance.Balance{}, false
 	}
-	b, err := s.Store.GetBalanceByUID(c.Request.Context(), uid)
+	b, err := s.Store.GetBalanceByUID(c.Request.Context(), sessionUserUID(c), uid)
 	if err != nil {
 		writeBalanceError(c, err)
 		return balance.Balance{}, false
@@ -80,7 +80,7 @@ func (s *Server) createBalance(c *gin.Context) {
 		writeBalanceError(c, err)
 		return
 	}
-	if err := s.Store.CreateBalance(c.Request.Context(), &b); err != nil {
+	if err := s.Store.CreateBalance(c.Request.Context(), sessionUserUID(c), &b); err != nil {
 		writeBalanceError(c, err)
 		return
 	}
@@ -111,9 +111,9 @@ func (s *Server) listBalances(c *gin.Context) {
 		err   error
 	)
 	if payableOnly {
-		items, err = s.Store.ListPayableBalances(c.Request.Context())
+		items, err = s.Store.ListPayableBalances(c.Request.Context(), sessionUserUID(c))
 	} else {
-		items, err = s.Store.ListBalances(c.Request.Context(), typ)
+		items, err = s.Store.ListBalances(c.Request.Context(), sessionUserUID(c), typ)
 	}
 	if err != nil {
 		internalError(c, err)
@@ -134,7 +134,7 @@ func (s *Server) getBalance(c *gin.Context) {
 // balanceConflict answers 409 with the balance as it is now (or 404 if it was
 // deleted meanwhile).
 func (s *Server) balanceConflict(c *gin.Context, uid string) {
-	cur, err := s.Store.GetBalanceByUID(c.Request.Context(), uid)
+	cur, err := s.Store.GetBalanceByUID(c.Request.Context(), sessionUserUID(c), uid)
 	if err != nil {
 		writeBalanceError(c, err)
 		return
@@ -149,7 +149,7 @@ func (s *Server) saveBalance(c *gin.Context, cur balance.Balance, opts store.Wri
 		s.balanceConflict(c, string(cur.UID))
 		return
 	}
-	updated, err := s.Store.UpdateBalanceWith(c.Request.Context(), cur.ID, opts, fn)
+	updated, err := s.Store.UpdateBalanceWith(c.Request.Context(), sessionUserUID(c), cur.ID, opts, fn)
 	if errors.Is(err, store.ErrVersionConflict) {
 		s.balanceConflict(c, string(cur.UID))
 		return
@@ -197,7 +197,7 @@ func (s *Server) deleteBalance(c *gin.Context) {
 	if !ok {
 		return
 	}
-	err := s.Store.DeleteBalanceWith(c.Request.Context(), cur.ID, store.WriteOptions{Version: version})
+	err := s.Store.DeleteBalanceWith(c.Request.Context(), sessionUserUID(c), cur.ID, store.WriteOptions{Version: version})
 	if errors.Is(err, store.ErrVersionConflict) {
 		s.balanceConflict(c, string(cur.UID))
 		return

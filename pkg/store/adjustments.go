@@ -12,10 +12,6 @@ import (
 	"github.com/nutmos/expensetrackr/pkg/transaction"
 )
 
-// clock is the time source for balance adjustment timestamps (tests may
-// replace it).
-var clock = time.Now
-
 // adjustment describes the Balance Adjustment implied by a manual edit.
 type adjustment struct {
 	field     string // "balance" (asset) or "debt" (liability)
@@ -64,8 +60,8 @@ func adjustmentFor(cur, next balance.Balance) (adjustment, bool) {
 // manual edit from cur to next (if any), inside the caller's database
 // transaction. The row is never applied to the balance (balance_applied = 0,
 // and transaction.Effects returns nothing for it): the edit already set the
-// new value. spent_at is the server's current local time with its UTC offset.
-func recordBalanceAdjustment(ctx context.Context, tx *sql.Tx, cur, next balance.Balance, createdAt string) error {
+// new value. spentAt comes from the store clock (with its local UTC offset).
+func recordBalanceAdjustment(ctx context.Context, tx *sql.Tx, userUID string, cur, next balance.Balance, createdAt string, spentAt time.Time) error {
 	a, ok := adjustmentFor(cur, next)
 	if !ok {
 		return nil
@@ -74,13 +70,13 @@ func recordBalanceAdjustment(ctx context.Context, tx *sql.Tx, cur, next balance.
 	if err != nil {
 		return err
 	}
-	at := clock().Truncate(time.Second)
+	at := spentAt.Truncate(time.Second)
 	note := fmt.Sprintf("Manual edit of %s: %s → %s", a.field,
 		money.FormatAmount(a.old, next.Scale), money.FormatAmount(a.new, next.Scale))
 	if _, err := tx.ExecContext(ctx,
-		`INSERT INTO transactions (uid, type, amount_minor, amount_scale, currency, balance_uid, account, spent_at, spent_at_unix, note, created_at, version, balance_applied, adjustment_direction)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, 0, ?)`,
-		uid, string(transaction.BalanceAdjustment), a.amount, next.Scale, next.Currency, cur.UID, next.Name,
+		`INSERT INTO transactions (uid, user_uid, type, amount_minor, amount_scale, currency, balance_uid, account, spent_at, spent_at_unix, note, created_at, version, balance_applied, adjustment_direction)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, 0, ?)`,
+		uid, userUID, string(transaction.BalanceAdjustment), a.amount, next.Scale, next.Currency, cur.UID, next.Name,
 		at.Format(time.RFC3339), at.Unix(), note, createdAt, string(a.direction)); err != nil {
 		return fmt.Errorf("record balance adjustment: %w", err)
 	}

@@ -89,8 +89,12 @@ var baselineObjects = []string{
 // v2Objects are the tables and indexes added by migration v2 (api_tokens).
 var v2Objects = []string{"table api_tokens", "index idx_api_tokens_user_uid"}
 
+// v3Objects are indexes added by migration v3 (per-user balances/transactions).
+// The balances/transactions tables themselves are rebuilt in place.
+var v3Objects = []string{"index idx_balances_user_uid", "index idx_transactions_user_uid"}
+
 // latestObjects are the user tables and indexes of a fully migrated database.
-var latestObjects = append(append([]string{}, baselineObjects...), v2Objects...)
+var latestObjects = append(append(append([]string{}, baselineObjects...), v2Objects...), v3Objects...)
 
 func TestFreshDatabaseGetsBaseline(t *testing.T) {
 	ctx := context.Background()
@@ -99,8 +103,9 @@ func TestFreshDatabaseGetsBaseline(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	owner := seedOwner(t, st)
 	b := mustBalance(t, balance.Input{Name: "Cash", Type: "payment_account", Currency: "SGD", Balance: dec("10")})
-	if err := st.CreateBalance(ctx, &b); err != nil {
+	if err := st.CreateBalance(ctx, owner, &b); err != nil {
 		t.Fatal(err)
 	}
 	e, err := transaction.CreateInput{Amount: "5", Currency: "SGD", BalanceUID: string(b.UID), SpentAt: "2026-10-07T08:00:00+08:00"}.Validate()
@@ -108,13 +113,13 @@ func TestFreshDatabaseGetsBaseline(t *testing.T) {
 		t.Fatal(err)
 	}
 	e.Account = "Cash"
-	if err := st.Create(ctx, &e); err != nil || e.ID != 1 {
+	if err := st.Create(ctx, owner, &e); err != nil || e.ID != 1 {
 		t.Fatalf("create on fresh db: id=%d err=%v", e.ID, err)
 	}
 	st.Close()
 
-	if SchemaVersion != 2 {
-		t.Errorf("SchemaVersion = %d, want 2 (baseline + api_tokens)", SchemaVersion)
+	if SchemaVersion != 3 {
+		t.Errorf("SchemaVersion = %d, want 3 (baseline + api_tokens + per-user data)", SchemaVersion)
 	}
 	if v := pragmaInt(t, path, "user_version"); v != SchemaVersion {
 		t.Errorf("user_version = %d, want %d", v, SchemaVersion)
@@ -228,7 +233,7 @@ func TestUpdateNotFound(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer st.Close()
-	_, err = st.UpdateWith(context.Background(), 42, WriteOptions{}, func(cur transaction.Transaction) (transaction.Transaction, error) { return cur, nil })
+	_, err = st.UpdateWith(context.Background(), "missing-user", 42, WriteOptions{}, func(cur transaction.Transaction) (transaction.Transaction, error) { return cur, nil })
 	if !errors.Is(err, ErrNotFound) {
 		t.Errorf("got %v, want ErrNotFound", err)
 	}
