@@ -89,7 +89,10 @@ handling and safety rules. Details are in its
 [`reference.md`](skills/expensetrackr-api/reference.md); the helper
 [`scripts/etr.sh`](skills/expensetrackr-api/scripts/etr.sh) wraps curl with a
 cookie jar, auto-login from `EXPENSETRACKR_USERNAME` / `EXPENSETRACKR_PASSWORD`
-and GET → PUT edits with conflict retry. Copy or symlink the folder into your
+and GET → PUT edits with conflict retry. For recording a single expense,
+income, transfer or asset purchase with a Bearer API token, see the focused
+[`skills/expensetrackr-log-transaction/`](skills/expensetrackr-log-transaction/SKILL.md)
+skill. Copy or symlink the folder into your
 agent's skills directory (e.g. `~/.claude/skills/` or `.cursor/skills/`).
 
 **API tokens** are the simpler option for agents: create one in
