@@ -16,6 +16,7 @@ import (
 // different layout and have application_id 0).
 //
 //	v1  baseline: the complete schema in baselineSchema (schema.go)
+//	v2  api_tokens: personal API tokens (migrate_v2.go)
 //
 // migrations[i] upgrades a database from user_version i to i+1; migrations[0]
 // creates the baseline in an empty database. Each step runs in its own SQL
@@ -52,6 +53,8 @@ type migration func(tx *sql.Tx) error
 var migrations = []migration{
 	// 0 -> 1: baseline schema (empty database only).
 	createBaseline,
+	// 1 -> 2: personal API tokens.
+	createAPITokens,
 }
 
 // SchemaVersion is the user_version a fully migrated database has.

@@ -17,6 +17,7 @@ in the flow (the `users.email` column stays, optional). SSO (Apple / Google via
 | Registration | Open only on **first run** (no user has a password yet). Afterwards only a logged-in user can register more accounts (403 `registration_closed` otherwise). |
 | Brute force | In-memory throttle per *username + client IP*: 5 failures within 15 minutes → 429 with `Retry-After` for 5 minutes. Reset on success and on restart. |
 | CSRF | Origin / `Sec-Fetch-Site` check + JSON-only request bodies (see below). |
+| API tokens | `Authorization: Bearer ext_...` for scripts and agents; hash-only storage, `read`/`write` scopes, session-only token management (see "API tokens"). |
 
 ## Endpoints (`/api/auth`)
 
@@ -30,7 +31,7 @@ in the flow (the `users.email` column stays, optional). SSO (Apple / Google via
 
 ## What is public
 
-Everything under `/api` needs a valid session (401 JSON
+Everything under `/api` needs a valid session or API token (401 JSON
 `{"error":"authentication required","code":"unauthenticated"}`) **except**:
 
 - `POST /api/auth/login`, `POST /api/auth/register` (handler enforces first-run), `POST /api/auth/logout`
@@ -56,6 +57,8 @@ send requests. For every non-GET/HEAD/OPTIONS request to `/api/*`:
    cannot send that cross-site without a CORS preflight, which this server never approves.
 
 Non-browser clients (curl, scripts) send neither header and are unaffected.
+Requests with an `Authorization: Bearer` token skip steps 1–2 (see "CSRF and
+Bearer requests").
 `SameSite=Lax` on the cookie is a further layer. The login endpoint is guarded
 too (prevents login CSRF).
 
@@ -76,6 +79,72 @@ CREATE TABLE sessions (
 
 Part of the baseline schema (`pkg/store/schema.go`). Deleting a user deletes
 their sessions.
+
+## API tokens
+
+Personal API tokens let scripts and AI agents call the API without a browser
+login. Manage them in **Settings → API tokens** (or the endpoints below, with
+a session).
+
+| Topic | Decision |
+|-------|----------|
+| Format | `ext_` + 32 random bytes from `crypto/rand`, base64url (47 characters). The `ext_` prefix makes leaked tokens easy to recognize and scan for. |
+| Storage | Table `api_tokens` (schema v2). Only the SHA-256 (hex) of the token is stored, plus a non-secret display prefix (the first 12 characters, e.g. `ext_Ab12Cd34`). The plaintext is returned **once**, by `POST /api/tokens`. |
+| Lookup | By hash (unique index), then the stored hash is compared again with `subtle.ConstantTimeCompare`. |
+| Sending | `Authorization: Bearer ext_...`. When this header is present the session cookie is **ignored**, so a token request never gains session-only rights and a bad token is 401 even with a valid cookie. |
+| Rejected (401 `invalid_token`) | Unknown, malformed (no `ext_` prefix, longer than 128 characters), revoked or expired tokens, and tokens of a disabled or password-less user. |
+| Scopes | `read`: GET/HEAD only. `write`: every method. A `read` token on another method gets 403 `insufficient_scope`. |
+| Session only (403 `session_required`) | `GET/POST /api/tokens`, `DELETE /api/tokens/:uid`, `PUT /api/auth/password`, `POST /api/auth/logout`, `POST /api/auth/register`. A token can't mint, list or revoke tokens, change credentials, create password accounts or end sessions. |
+| Expiry | Optional `expires_in_days` (1–3650). Without it the token lives until revoked. |
+| Last used | `last_used_at` is written at most once a minute (same throttle as the session touch). |
+| Revocation | `DELETE /api/tokens/:uid` sets `revoked_at`; the row is kept for audit and no longer listed. Another user's token is 404. Deleting a user deletes their tokens (`ON DELETE CASCADE`). |
+
+### CSRF and Bearer requests
+
+The Origin / `Sec-Fetch-Site` checks exist because browsers attach the
+cookie automatically. They are **skipped** for requests with an
+`Authorization: Bearer` header: a browser never adds that header by itself,
+a cross-site page cannot set it without a CORS preflight (which this server
+never approves), and such a request is authenticated only by the token,
+never by the cookie. The `Content-Type: application/json` rule for bodies
+still applies to every request.
+
+### Endpoints (`/api/tokens`, session only)
+
+| Method | Path | Result |
+|--------|------|--------|
+| GET | `/api/tokens` | 200 `{"tokens":[...],"count":n}`: your active tokens (`uid`, `name`, `prefix`, `scopes`, `created_at`, `last_used_at`, `expires_at`); never the secret or hash. |
+| POST | `/api/tokens` | `{"name","scopes",["expires_in_days"]}` → 201 the token plus `token` (the plaintext, only here). 422 for a missing or too long name (max 64 characters), missing or unknown scopes, or out-of-range days. |
+| DELETE | `/api/tokens/:uid` | 204 revoked; 404 not yours / unknown / already revoked; 400 not a UUID. |
+
+### Using a token from an agent
+
+```sh
+export EXPENSE_TOKEN=ext_...   # from Settings → API tokens
+curl -H "Authorization: Bearer $EXPENSE_TOKEN" http://127.0.0.1:8080/api/transactions
+curl -X POST -H "Authorization: Bearer $EXPENSE_TOKEN" -H "Content-Type: application/json" \
+  -d '{"amount":"12.50","currency":"SGD","balance_uid":"<balance uid>","spent_at":"2026-11-05T12:30:00+08:00","note":"Lunch"}' \
+  http://127.0.0.1:8080/api/transactions
+```
+
+### Table `api_tokens` (schema v2)
+
+```sql
+CREATE TABLE api_tokens (
+    id           INTEGER PRIMARY KEY AUTOINCREMENT,
+    uid          TEXT NOT NULL UNIQUE,
+    user_uid     TEXT NOT NULL REFERENCES users (uid) ON DELETE CASCADE,
+    name         TEXT NOT NULL,
+    prefix       TEXT NOT NULL,          -- non-secret display prefix
+    token_hash   TEXT NOT NULL UNIQUE CHECK (length(token_hash) = 64), -- sha256 hex
+    scopes       TEXT NOT NULL,          -- space-separated: "read write"
+    created_at   TEXT NOT NULL,          -- RFC 3339 UTC
+    last_used_at TEXT,
+    expires_at   TEXT,                   -- NULL: never expires
+    revoked_at   TEXT                    -- NULL: active
+);
+CREATE INDEX idx_api_tokens_user_uid ON api_tokens (user_uid);
+```
 
 ## First run
 

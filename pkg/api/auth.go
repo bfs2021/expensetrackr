@@ -89,11 +89,17 @@ func csrfGuard(c *gin.Context) {
 		c.Next()
 		return
 	}
-	if sfs := c.GetHeader("Sec-Fetch-Site"); sfs != "" && sfs != "same-origin" && sfs != "none" {
+	// Bearer requests carry their credential explicitly; a browser never
+	// adds it on its own and cannot send it cross-site without a CORS
+	// preflight (never approved), and requireAuth ignores the cookie when a
+	// Bearer header is present. So the Origin checks are skipped for them;
+	// the JSON Content-Type rule below still applies.
+	_, isBearer := bearerToken(c)
+	if sfs := c.GetHeader("Sec-Fetch-Site"); !isBearer && sfs != "" && sfs != "same-origin" && sfs != "none" {
 		c.AbortWithStatusJSON(http.StatusForbidden, errorBody{Error: "cross-site request rejected", Code: "csrf"})
 		return
 	}
-	if o := c.GetHeader("Origin"); o != "" {
+	if o := c.GetHeader("Origin"); !isBearer && o != "" {
 		u, err := url.Parse(o)
 		if err != nil || o == "null" || !strings.EqualFold(u.Host, c.Request.Host) {
 			c.AbortWithStatusJSON(http.StatusForbidden, errorBody{Error: "cross-origin request rejected", Code: "csrf"})
@@ -113,6 +119,26 @@ func csrfGuard(c *gin.Context) {
 // requireAuth loads the session (if any) for every /api request and rejects
 // non-public routes without one (401 JSON).
 func (s *Server) requireAuth(c *gin.Context) {
+	if tok, isBearer := bearerToken(c); isBearer {
+		// A Bearer header decides alone; the cookie is ignored, so a token
+		// request can never pick up session-only rights.
+		if s.Store == nil {
+			s.unauthorized(c)
+			return
+		}
+		u, t, ok := s.loadAPIToken(c, tok)
+		if !ok {
+			c.AbortWithStatusJSON(http.StatusUnauthorized, errorBody{Error: "invalid, expired or revoked API token", Code: "invalid_token"})
+			return
+		}
+		if !tokenAllowed(c, t) {
+			return
+		}
+		c.Set("user", u)
+		c.Set("api_token", t)
+		c.Next()
+		return
+	}
 	if s.Store != nil {
 		if u, se, ok := s.loadSession(c); ok {
 			c.Set("user", u)

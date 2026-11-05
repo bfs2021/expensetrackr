@@ -86,6 +86,12 @@ var baselineObjects = []string{
 	"table user_categories", "table meta", "table fx_rates", "table fx_rate_lookups",
 }
 
+// v2Objects are the tables and indexes added by migration v2 (api_tokens).
+var v2Objects = []string{"table api_tokens", "index idx_api_tokens_user_uid"}
+
+// latestObjects are the user tables and indexes of a fully migrated database.
+var latestObjects = append(append([]string{}, baselineObjects...), v2Objects...)
+
 func TestFreshDatabaseGetsBaseline(t *testing.T) {
 	ctx := context.Background()
 	path := filepath.Join(t.TempDir(), "fresh.db")
@@ -107,8 +113,8 @@ func TestFreshDatabaseGetsBaseline(t *testing.T) {
 	}
 	st.Close()
 
-	if SchemaVersion != 1 {
-		t.Errorf("SchemaVersion = %d, want 1 (baseline only)", SchemaVersion)
+	if SchemaVersion != 2 {
+		t.Errorf("SchemaVersion = %d, want 2 (baseline + api_tokens)", SchemaVersion)
 	}
 	if v := pragmaInt(t, path, "user_version"); v != SchemaVersion {
 		t.Errorf("user_version = %d, want %d", v, SchemaVersion)
@@ -123,10 +129,10 @@ func TestFreshDatabaseGetsBaseline(t *testing.T) {
 			user = append(user, k)
 		}
 	}
-	if len(user) != len(baselineObjects) {
-		t.Errorf("schema objects = %v, want exactly %v", user, baselineObjects)
+	if len(user) != len(latestObjects) {
+		t.Errorf("schema objects = %v, want exactly %v", user, latestObjects)
 	}
-	for _, k := range baselineObjects {
+	for _, k := range latestObjects {
 		if _, ok := got[k]; !ok {
 			t.Errorf("missing %s", k)
 		}
